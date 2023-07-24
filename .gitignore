@@ -14,3 +14,6 @@ flagged
 !pretrained_ckpts/auxiliray/model.pth
 
 start.sh
+running_exp/*
+example/*
+tmp_frames/*

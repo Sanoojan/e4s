@@ -167,6 +167,7 @@ class Coach:
 
         # Initialize dataset
         self.train_dataset, self.test_dataset = self.configure_datasets()
+        # breakpoint()
         if self.opts.dist_train:
             self.train_sampler = torch.utils.data.distributed.DistributedSampler(self.train_dataset,shuffle=True)
             self.train_dataloader = DataLoader(self.train_dataset,
@@ -253,6 +254,7 @@ class Coach:
                                     fraction=self.opts.ds_frac,
                                     flip_p=self.opts.flip_p)
         else:
+            # breakpoint()
             train_ds = CelebAHQDataset(dataset_root=self.opts.celeba_dataset_root, mode="train",
                                     img_transform=transforms.Compose(
                                         [TO_TENSOR, NORMALIZE]),
@@ -280,12 +282,12 @@ class Coach:
         while self.global_step <= self.opts.max_steps:
             for batch_idx, batch in enumerate(self.train_dataloader):                    
                 img, mask, mask_vis = batch
-                
+                # breakpoint()
                 img = img.to(self.device).float()
                 mask = (mask*255).long().to(self.device)
                 # [bs,1,H,W] format mask to one-hot，i.e., [bs,#seg_cls,H,W]
                 onehot = torch_utils.labelMap2OneHot(mask, num_cls=self.opts.num_seg_cls)
-                
+                # breakpoint()
                 # ============ update D ===============
                 if self.opts.train_D and (self.global_step % self.opts.d_every == 0):
                     torch_utils.requires_grad(self.net, False)
@@ -464,7 +466,7 @@ class Coach:
 
     def parse_images(self, mask, img, recon1, display_count=2):
         im_data = []
-
+        # breakpoint()
         display_count=min(display_count,len(img))
         for i in range(display_count):
             cur_im_data = {

@@ -213,6 +213,42 @@ def crop_faces(IMAGE_SIZE, files, scale, center_sigma=0.0, xy_sigma=0.0, use_fa=
 
     return crops, orig_images, quads
 
+def crop_faces_from_image(IMAGE_SIZE, frame, scale, center_sigma=0.0, xy_sigma=0.0, use_fa=False):
+    if use_fa:
+        import face_alignment
+        fa = face_alignment.FaceAlignment(face_alignment.LandmarksType._2D, flip_input=True)
+        predictor = None
+        detector = None
+    else:
+        import dlib
+        fa = None
+        predictor = dlib.shape_predictor("./pretrained_ckpts/shape_predictor_68_face_landmarks.dat")
+        detector = dlib.get_frontal_face_detector()
+
+    cs, xs, ys = [], [], []
+    for _, path in tqdm(files):
+        c, x, y = compute_transform(path, predictor, detector=detector,
+                                    scale=scale, fa=fa)
+        cs.append(c)
+        xs.append(x)
+        ys.append(y)
+
+    cs = np.stack(cs)
+    xs = np.stack(xs)
+    ys = np.stack(ys)
+    if center_sigma != 0:
+        cs = gaussian_filter1d(cs, sigma=center_sigma, axis=0)
+
+    if xy_sigma != 0:
+        xs = gaussian_filter1d(xs, sigma=xy_sigma, axis=0)
+        ys = gaussian_filter1d(ys, sigma=xy_sigma, axis=0)
+
+    quads = np.stack([cs - xs - ys, cs - xs + ys, cs + xs + ys, cs + xs - ys], axis=1)
+    quads = list(quads)
+
+    crops, orig_images = crop_faces_by_quads(IMAGE_SIZE, files, quads)
+
+    return crops, orig_images, quads
 
 def crop_faces_by_quads(IMAGE_SIZE, files, quads):
     orig_images = []

@@ -8,7 +8,7 @@ import torch
 import torchvision.transforms.functional as TF
 
 from src.datasets.utils import make_dataset
-
+from torchvision.utils import save_image
 
 # 19 attributes in total, skin-1,nose-2,...cloth-18, background-0
 celelbAHQ_label_list = ['skin', 'nose', 'eye_g', 'l_eye', 'r_eye',
@@ -124,6 +124,7 @@ def __ffhq_masks_to_faceParser_mask(mask):
         np.logical_or(np.equal(mask, 11), np.equal(mask, 12)),
         np.equal(mask, 13)
     )
+
     converted_mask[mouth] = 1
 
     eyebrows = np.logical_or(np.equal(mask, 2),
@@ -140,6 +141,7 @@ def __ffhq_masks_to_faceParser_mask(mask):
     converted_mask[nose] = 5
 
     skin = np.equal(mask, 1)
+
     converted_mask[skin] = 6
 
     ears = np.logical_or(np.equal(mask, 7), np.equal(mask, 8))
@@ -189,6 +191,7 @@ def __celebAHQ_masks_to_faceParser_mask_detailed(celebA_mask):
     converted_mask[nose] = 5
 
     skin = np.equal(celebA_mask, 1)
+    # print('skin', np.sum(skin))
     converted_mask[skin] = 6
 
     ears = np.logical_or(np.equal(celebA_mask, 8), np.equal(celebA_mask, 9))
@@ -271,11 +274,13 @@ class CelebAHQDataset(Dataset):
 
         if mode == "train":
             self.imgs = sorted([osp.join(self.root, "CelebA-HQ-img", "%d.jpg"%idx) for idx in range(28000)])
-            self.labels = sorted([osp.join(self.root, "CelebA-HQ-mask", "%d.png"%idx) for idx in range(28000)])
+            # self.labels = ([osp.join(self.root, "CelebA-HQ-mask", "%d"%int(idx/2000) ,'{0:0=5d}'.format(idx)+'_skin.png') for idx in range(28000)])
+            self.labels =  sorted([osp.join(self.root, "CelebA-HQ-mask/Overall_mask", "%d.png"%idx) for idx in range(28000)]) 
             self.labels_vis =  sorted([osp.join(self.root, "vis", "%d.png"%idx) for idx in range(28000)]) if self.load_vis_img else None
         else:
             self.imgs = sorted([osp.join(self.root, "CelebA-HQ-img", "%d.jpg"%idx) for idx in range(28000, 30000)])
-            self.labels = sorted([osp.join(self.root, "CelebA-HQ-mask", "%d.png"%idx) for idx in range(28000, 30000)])
+            # self.labels = ([osp.join(self.root, "CelebA-HQ-mask", "%d"%int(idx/2000) ,'{0:0=5d}'.format(idx)+'_skin.png') for idx in range(28000, 30000)])
+            self.labels =  sorted([osp.join(self.root, "CelebA-HQ-mask/Overall_mask", "%d.png"%idx) for idx in range(28000, 30000)]) 
             self.labels_vis =  sorted([osp.join(self.root, "vis", "%d.png"%idx) for idx in range(28000, 30000)]) if self.load_vis_img else None
 
         self.imgs= self.imgs[:int(len(self.imgs)*self.fraction)]
@@ -313,9 +318,16 @@ class CelebAHQDataset(Dataset):
             img = self.img_transform(img)
 
         label = self.labels[index]
+        # print(label)
         label = Image.open(label).convert('L')
+        # breakpoint()
+        # label2=TO_TENSOR(label)
+        # save_image(label2, str(index)+'_label.png')
+        # save_image(img, str(index)+'_img.png')  
+        
         if self.label_transform is not None:
-            label = self.label_transform(label)
+            label= self.label_transform(label)
+ 
 
         if self.load_vis_img:
             label_vis = self.labels_vis[index]
@@ -323,18 +335,19 @@ class CelebAHQDataset(Dataset):
             label_vis = TO_TENSOR(label_vis)
         else:
             label_vis = -1  # unified interface
+        # save_image(label, str(index)+'_label.png')
+        # save_image(img, str(index)+'_img.png')  
+
         return img, label, label_vis
 
     def __getitem__(self, idx):
         index = self.indices[idx]
-
         img, label, label_vis = self.load_single_image(index)
-        
         if self.flip_p > 0:
             if random.random() < self.flip_p:
                 img = TF.hflip(img)
                 label = TF.hflip(label)
-                
+           
         return img, label, label_vis
     
         
@@ -415,5 +428,6 @@ class FFHQDataset(Dataset):
 
 if __name__ == '__main__':
     ds = CelebAHQDataset(dataset_root="/mnt/hdd8T/lza/py_projs/e4s/data/CelebAMask-HQ")
+
     sample = ds.__getitem__(25)
     print(-1)
