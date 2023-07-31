@@ -179,33 +179,53 @@ def keypoint_transformation(kp_canonical, he, estimate_jacobian=True, free_view=
 
     return {'value': kp_transformed, 'jacobian': jacobian_transformed}
 
-def make_animation(source_image, driving_video, generator, kp_detector, he_estimator, relative=True, adapt_movement_scale=True, estimate_jacobian=True, cpu=False, free_view=False, yaw=0, pitch=0, roll=0):
+def make_animation(source,kp_source,kp_canonical,he_source, driving_video, generator, kp_detector, he_estimator, relative=True, adapt_movement_scale=True, estimate_jacobian=True, cpu=False, free_view=False, yaw=0, pitch=0, roll=0):
     with torch.no_grad():
         predictions = []
-        source = torch.tensor(source_image[np.newaxis].astype(np.float32)).permute(0, 3, 1, 2)
-        if not cpu:
-            source = source.cuda()
+        # if not cpu:
+        #     source = source.cuda()
         driving = torch.tensor(np.array(driving_video)[np.newaxis].astype(np.float32)).permute(0, 4, 1, 2, 3)
-        kp_canonical = kp_detector(source)
-        he_source = he_estimator(source)
-        he_driving_initial = he_estimator(driving[:, :, 0])
+        
+        # he_driving_initial = he_estimator(driving[:, :, 0])
 
-        kp_source = keypoint_transformation(kp_canonical, he_source, estimate_jacobian)
-        kp_driving_initial = keypoint_transformation(kp_canonical, he_driving_initial, estimate_jacobian)
+        # kp_driving_initial = keypoint_transformation(kp_canonical, he_driving_initial, estimate_jacobian)
         # kp_driving_initial = keypoint_transformation(kp_canonical, he_driving_initial, free_view=free_view, yaw=yaw, pitch=pitch, roll=roll)
-
+     
         for frame_idx in range(driving.shape[2]):
             driving_frame = driving[:, :, frame_idx]
             if not cpu:
                 driving_frame = driving_frame.cuda()
             he_driving = he_estimator(driving_frame)
-            kp_driving = keypoint_transformation(kp_canonical, he_driving, estimate_jacobian, free_view=free_view, yaw=yaw, pitch=pitch, roll=roll)
+            yaw_d, pitch_d, roll_d = he_driving['yaw'], he_driving['pitch'], he_driving['roll']
+            yaw_d = headpose_pred_to_degree(yaw_d)
+            pitch_d = headpose_pred_to_degree(pitch_d)
+            roll_d = headpose_pred_to_degree(roll_d)
+            Head_direc=[]
+            # print(len(he_source))
+            for i,he_sour in enumerate(he_source):
+                yaw_s, pitch_s, roll_s = he_sour['yaw'], he_sour['pitch'], he_sour['roll']
+                yaw_s = headpose_pred_to_degree(yaw_s)
+                pitch_s = headpose_pred_to_degree(pitch_s)
+                roll_s = headpose_pred_to_degree(roll_s)
+                # print(yaw_s,pitch_s,roll_s)
+                head_dir_dis=abs(yaw_d-yaw_s)+abs(pitch_d-pitch_s)+abs(roll_d-roll_s)
+                Head_direc.append(head_dir_dis)
+            # find the smallest head direction distance
+            # print(Head_direc)
+            min_idx = torch.argmin(torch.tensor(Head_direc))
+ 
+            source_=source[min_idx]
+            kp_source_=kp_source[min_idx]
+            kp_canonical_=kp_canonical[min_idx]
+
+            
+            kp_driving = keypoint_transformation(kp_canonical_, he_driving, estimate_jacobian, free_view=free_view, yaw=yaw, pitch=pitch, roll=roll)
             # 
             # kp_norm = normalize_kp(kp_source=kp_source, kp_driving=kp_driving,
             #                        kp_driving_initial=kp_driving_initial, use_relative_movement=relative,
             #                        use_relative_jacobian=estimate_jacobian, adapt_movement_scale=adapt_movement_scale)
             # out = generator(source, kp_source=kp_source, kp_driving=kp_norm)
-            out = generator(source, kp_source=kp_source, kp_driving=kp_driving)
+            out = generator(source_, kp_source=kp_source_, kp_driving=kp_driving)
 
             predictions.append(np.transpose(out['prediction'].data.cpu().numpy(), [0, 2, 3, 1])[0])
     return predictions
@@ -224,8 +244,7 @@ def init_facevid2vid_pretrained_model(cfg_path, ckpt_path):
     return generator, kp_detector, he_estimator, estimate_jacobian
 
 
-def drive_source_demo(
-    source_im, target_ims,  # input paths
+def drive_source_demo(source,kp_source,kp_canonical,he_source, target_ims,  # input paths
     generator, kp_detector, he_estimator, estimate_jacobian  # model params
     ):
     """ 
@@ -238,27 +257,9 @@ def drive_source_demo(
         predictions (List[np.array]): the driven results, [H,W,3] 256*256 shape, [0,1] range
     """
     
-    predictions = make_animation(source_im, target_ims, generator, kp_detector, he_estimator, 
+    predictions = make_animation(source,kp_source,kp_canonical,he_source, target_ims, generator, kp_detector, he_estimator, 
                                  relative=True, adapt_movement_scale=True, estimate_jacobian=estimate_jacobian)
         
     return predictions
 
 
-def drive_source_demo(
-    source_im, target_ims,  # input paths
-    generator, kp_detector, he_estimator, estimate_jacobian  # model params
-    ):
-    """ 
-
-    args:
-        source_im (np.array): [H,W,3] 256*256, [0,1] range
-        target_ims (List[np.array]): each image in the target_ims list keeps the same format as the source_im
-    return:
-    
-        predictions (List[np.array]): the driven results, [H,W,3] 256*256 shape, [0,1] range
-    """
-
-    predictions = make_animation(source_im, target_ims, generator, kp_detector, he_estimator, 
-                                 relative=True, adapt_movement_scale=True, estimate_jacobian=estimate_jacobian)
-        
-    return predictions

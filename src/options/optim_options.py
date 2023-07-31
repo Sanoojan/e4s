@@ -17,7 +17,7 @@ class OptimOptions:
 		self.parser.add_argument('--load_ema', default=False, type=bool, help='Whether to load the styleGAN EMA model')
 		self.parser.add_argument('--n_styles', default=18, type=int, help='StyleGAN layer number')
 		self.parser.add_argument('--fsencoder_type', type=str, default="psp", help='FS Encode type')    
-		self.parser.add_argument('--checkpoint_path', default="./pretrained_ckpts/e4s/iteration_30000.pt", type=str, help='Path to model checkpoint')
+		self.parser.add_argument('--checkpoint_path', default="./pretrained_ckpts/e4s/iteration_10000.pt", type=str, help='Path to model checkpoint')
 		self.parser.add_argument('--train_G', default=False, type=bool, help='Whether to train the styleGAN model')
   
         # ================= Dataset =====================
@@ -46,7 +46,8 @@ class OptimOptions:
 		self.parser.add_argument('--id_loss_multiscale', default=True, type=bool, help='Whether to apply multi scale in ID loss')  
 		self.parser.add_argument('--face_parsing_lambda', default=0.1, type=float, help='Face parsing loss multiplier factor')		
 		self.parser.add_argument('--l2_lambda', default=1.0, type=float, help='L2 loss multiplier factor')
-		self.parser.add_argument('--ir_se50_path', default='./pretrained_ckpts/auxiliray/model_ir_se50.pth', type=str, help='Path to ir_se50 model weights')        
+		# self.parser.add_argument('--ir_se50_path', default='./pretrained_ckpts/auxiliray/model_ir_se50.pth', type=str, help='Path to ir_se50 model weights')    
+		self.parser.add_argument('--ir_se50_path', default='/share/users/sanoojan/BlendFace/checkpoints/blendface.pt', type=str, help='Path to ir_se50 model weights')    
 		self.parser.add_argument('--face_parsing_model_path', default='./pretrained_ckpts/auxiliray/model.pth', type=str, help='Path to face parsing model weights')
 	
 	def parse(self):

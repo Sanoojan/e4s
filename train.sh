@@ -1,6 +1,6 @@
 
 
-CUDA_VISIBLE_DEVICES=1,2 python  -m torch.distributed.launch \
+CUDA_VISIBLE_DEVICES=4,5 python  -m torch.distributed.launch \
         --nproc_per_node=2 \
         --nnodes=1 \
         --node_rank=0 \

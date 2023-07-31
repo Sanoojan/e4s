@@ -5,22 +5,28 @@ from argparse import ArgumentParser
 from PIL import Image
 import torch
 import warnings
+import proglog
 warnings.filterwarnings("ignore")
-
+import shutil
+from tqdm import tqdm
 import numpy as np
+import glob
 import torchvision.transforms as transforms
 from torch.nn import functional as F
 from skimage.transform import resize
 import sys
-sys.path.append(".")
+import subprocess
 
+sys.path.append(".")
+from moviepy.editor import AudioFileClip, VideoFileClip
+from moviepy.video.io.ImageSequenceClip import ImageSequenceClip
 from src.pretrained.face_vid2vid.driven_demo import init_facevid2vid_pretrained_model, drive_source_demo
 from src.pretrained.gpen.gpen_demo import init_gpen_pretrained_model, GPEN_demo
 from src.pretrained.face_parsing.face_parsing_demo import init_faceParsing_pretrained_model, faceParsing_demo, vis_parsing_maps
 from src.utils.swap_face_mask import swap_head_mask_revisit_considerGlass
 
 from src.utils import torch_utils
-from src.utils.alignmengt import crop_faces, calc_alignment_coefficients
+from src.utils.alignmengt import crop_faces, calc_alignment_coefficients, crop_faces_from_image
 from src.utils.morphology import dilation, erosion
 from src.utils.multi_band_blending import blending
 
@@ -115,6 +121,23 @@ def crop_and_align_face(target_files):
     ]
     
     return crops, orig_images, quads, inv_transforms
+
+def crop_and_align_face_img(frame):
+    image_size = 1024
+    scale = 1.0
+    center_sigma = 0
+    xy_sigma = 0
+    use_fa = False
+    
+    print('Aligning images')
+    crops, orig_images, quads = crop_faces_from_image(image_size, frame, scale, center_sigma=center_sigma, xy_sigma=xy_sigma, use_fa=use_fa)
+    
+    inv_transforms = [
+        calc_alignment_coefficients(quad + 0.5, [[0, 0], [0, image_size], [image_size, image_size], [image_size, 0]])
+        for quad in quads
+    ]
+    
+    return crops, orig_images, quads, inv_transforms
                     
 def swap_comp_style_vector(style_vectors1, style_vectors2, comp_indices=[], belowFace_interpolation=False):
     """Replace the style_vectors1 with style_vectors2
@@ -146,51 +169,23 @@ def swap_comp_style_vector(style_vectors1, style_vectors2, comp_indices=[], belo
         style_vectors[:,8,:] = (style_vectors1[:,8,:] + style_vectors2[:,8,:]) / 2
     
     return style_vectors
-    
 
-@torch.no_grad()
-def faceSwapping_pipeline(source, target, opts, save_dir, target_mask=None, need_crop = False, verbose = False, only_target_crop=False):
-    """
-    The overall pipeline of face swapping:
-
-        Input: source image, target image
-
-        (1) Crop the faces from the source and target and align them, obtaining S and T ; (cropping is optional)
-        (2) Use faceVid2Vid & GPEN to re-enact S, resulting in driven face D, and then parsing the mask of D
-        (3) Extract the texture vectors of D and T using RGI
-        (4) Texture and shape swapping between face D and face T        
-        (5) Feed the swapped mask and texture vectors to the generator, obtaining swapped face I;
-        (6) Stich I back to the target image
-
-    Args:
-        source (str): path to source
-        target (str): path to target
-        opts (): args
-        save_dir (str): the location to save results
-        target_mask (ndarray): 12-class segmap, will be estimated if not provided 
-        need_crop (bool): 
-        verbose (bool): 
-        only_target_crop (bool): only crop target image
-    """
-    os.makedirs(save_dir, exist_ok=True)
-
-    source_and_target_files = [source, target]
-    source_and_target_files = [(os.path.basename(f).split('.')[0], f) for f in source_and_target_files]
-    result_name = "swap_%s_to_%s.png"%(source_and_target_files[0][0], source_and_target_files[1][0])
-
+def inference(source, frame,source_and_target_files, opts, save_dir, target_mask=None, need_crop = False, verbose = False, only_target_crop=False):
     # (1) Crop the faces from the source and target and align them, obtaining S and T 
     if only_target_crop:
         crops, orig_images, quads, inv_transforms = crop_and_align_face(source_and_target_files[1:])
         crops = [crop.convert("RGB") for crop in crops]
         T = crops[0]
-        S = Image.open(source).convert("RGB").resize((1024, 1024))
+        # S = Image.open(source).convert("RGB").resize((1024, 1024))
+        S=source
     elif need_crop:
         crops, orig_images, quads, inv_transforms = crop_and_align_face(source_and_target_files)
         crops = [crop.convert("RGB") for crop in crops]
         S, T = crops
     else:
-        S = Image.open(source).convert("RGB").resize((1024, 1024))
-        T = Image.open(target).convert("RGB").resize((1024, 1024))
+        # S = Image.open(source).convert("RGB").resize((1024, 1024))
+        S=source
+        T = Image.fromarray(frame).convert("RGB").resize((1024, 1024))
         crops = [S, T]
     
     S_256, T_256 = [resize(np.array(im)/255.0, (256, 256)) for im in [S,T]]  # 256,[0,1] range
@@ -259,9 +254,8 @@ def faceSwapping_pipeline(source, target, opts, save_dir, target_mask=None, need
         swappped_one_hot = torch_utils.labelMap2OneHot(torch.from_numpy(swapped_msk).unsqueeze(0).unsqueeze(0).long(), num_cls=12)
         torch_utils.tensor2map(swappped_one_hot[0]).save(os.path.join(save_dir,"swappedMaskVis.png"))
     
-    # Texture swapping between face D and face T. Retain the style_vectors of backgroun(0), hair(4), era_rings(11), eye_glass(10) from target
-    # comp_indices = set(range(opts.num_seg_cls)) - {0, 4, 11, 10, 6,5,7,8}  # 10 glass, 8 neck
-    comp_indices = set(range(opts.num_seg_cls)) - {0, 4, 11, 10, 8,6,5}  # 10 glass, 8 neck
+    # Texture swapping between face D and face T. Retain the style_vectors of backgroun(0), hair(4), ear_rings(11), eye_glass(10) from target
+    comp_indices = set(range(opts.num_seg_cls)) - {0, 4, 11, 10,8,6}  # 10 glass, 8 neck # change @sanoojan
     swapped_style_vectors =  swap_comp_style_vector(target_style_vector, driven_style_vector, list(comp_indices), belowFace_interpolation=False)
     if verbose:
         torch.save(swapped_style_vectors, os.path.join(save_dir,"swapped_style_vec.pt"))
@@ -280,7 +274,7 @@ def faceSwapping_pipeline(source, target, opts, save_dir, target_mask=None, need
     #
     # Gaussian blending with mask
     outer_dilation = 5  
-    mask_bg = logical_or_reduce(*[swapped_msk == clz for clz in [0,11, 4,8,7    ]])   #For face swapping in video，condisder 4,8,7 as part of background.  11 earings 4 hair 8 neck 7 ear
+    mask_bg = logical_or_reduce(*[swapped_msk == clz for clz in [0,11, 4 ,8, 7   ]])  # change here@sanoojan  #For face swapping in video，condisder 4,8,7 as part of background.  11 earings 4 hair 8 neck 7 ear
     is_foreground = torch.logical_not(mask_bg)
     hole_index = hole_map[None][None] == 255
     is_foreground[hole_index[None]] = True
@@ -331,7 +325,144 @@ def faceSwapping_pipeline(source, target, opts, save_dir, target_mask=None, need
     else:
         pasted_image = swapped_and_pasted
 
-    pasted_image.save(os.path.join(save_dir, result_name))
+    return pasted_image
+    # pasted_image.save(os.path.join(save_dir, result_name))
+
+
+@torch.no_grad()
+def faceSwapping_pipeline(source, target, opts, save_dir, target_mask=None, need_crop = False, verbose = False, only_target_crop=False):
+    """
+    The overall pipeline of face swapping:
+
+        Input: source image, target video
+
+        (1) Crop the faces from the source and target and align them, obtaining S and T ; (cropping is optional)
+        (2) Use faceVid2Vid & GPEN to re-enact S, resulting in driven face D, and then parsing the mask of D
+        (3) Extract the texture vectors of D and T using RGI
+        (4) Texture and shape swapping between face D and face T        
+        (5) Feed the swapped mask and texture vectors to the generator, obtaining swapped face I;
+        (6) Stich I back to the target image
+
+    Args:
+        source (str): path to source
+        target (str): path to target
+        opts (): args
+        save_dir (str): the location to save results
+        target_mask (ndarray): 12-class segmap, will be estimated if not provided 
+        need_crop (bool): 
+        verbose (bool): 
+        only_target_crop (bool): only crop target image
+        
+    """
+    os.makedirs(save_dir, exist_ok=True)
+    input_video=target
+    target="example/input/faceswap/temp_target.jpg"
+    source_and_target_files = [source, target]
+
+    source_and_target_files = [(os.path.basename(f).split('.')[0], f) for f in source_and_target_files]
+    result_name = "swap_%s_to_%s.mp4"%(source_and_target_files[0][0], source_and_target_files[1][0])
+
+    
+    out_video_filename=os.path.join(save_dir, result_name)
+    video_forcheck = VideoFileClip(input_video)
+
+    if video_forcheck.audio is None:
+        no_audio = True
+    else:
+        no_audio = False
+
+    del video_forcheck
+
+    if not no_audio:
+        video_audio_clip = AudioFileClip(input_video)
+
+    video = cv2.VideoCapture(input_video)
+    ret = True
+    frame_index = 0
+    temp_results_dir = os.path.join(save_dir, 'temp_results')
+
+    frame_count = int(video.get(cv2.CAP_PROP_FRAME_COUNT))
+    fps = video.get(cv2.CAP_PROP_FPS)
+
+    # if os.path.exists(temp_results_dir):
+    #     shutil.rmtree(temp_results_dir)
+    os.makedirs(temp_results_dir, exist_ok=True)
+
+    source_z = None
+    S = Image.open(source).convert("RGB").resize((1024, 1024))
+    for frame_index in tqdm(range(frame_count)):
+        ret, frame = video.read()
+        if ret:
+            #write frame to file
+            # if(frame_index < 550):
+            #     continue
+            # cv2.imwrite('example/input/faceswap/temp_target.jpg',cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+            cv2.imwrite(os.path.join(save_dir,'temp_target.jpg'),frame)
+            
+            pasted_image=inference(S, frame,source_and_target_files, opts, save_dir, target_mask=target_mask, need_crop = need_crop, verbose = verbose, only_target_crop=only_target_crop)
+            
+            cv2.imwrite(os.path.join(temp_results_dir, 'frame_{:0>7d}.png'.format(frame_index)), cv2.cvtColor(np.asarray(pasted_image), cv2.COLOR_BGR2RGB))
+            # _, source_z = run_inference(opt, face, frame, RetinaFace, ArcFace, FaceDancer,
+            #                             os.path.join('./tmp_frames', 'frame_{:0>7d}.png'.format(frame_index)),
+            #      
+            #                        source_z=source_z)
+            # video.release()
+            # exit()
+    video.release()
+
+    path = os.path.join('./tmp_frames', '*.png')
+    image_filenames = sorted(glob.glob(path))
+    clips = ImageSequenceClip(image_filenames, fps=fps)
+    name = os.path.splitext(out_video_filename)[0]
+
+    if not no_audio:
+        clips = clips.set_audio(video_audio_clip)
+
+    if out_video_filename.lower().endswith('.gif'):
+        print("\nCreating GIF with FFmpeg...")
+        try:
+           subprocess.run('ffmpeg -y -v -8 -f image2 -framerate {} \
+               -i "./tmp_frames/frame_%07d.png" -filter_complex "[0:v]split [a][b];[a] \
+                   palettegen=stats_mode=single [p];[b][p]paletteuse=dither=bayer:bayer_scale=4" \
+                       -y "{}.gif"'.format(fps, name), shell=True, check=True)
+           print("\nGIF created: {}".format(out_video_filename))
+
+        except subprocess.CalledProcessError:
+            print("\nERROR! Failed to export GIF with FFmpeg")
+            print('\n', sys.exc_info())
+            sys.exit(0)
+
+    elif out_video_filename.lower().endswith('.webp'):
+        try:
+            print("\nCreating WEBP with FFmpeg...")
+            subprocess.run('ffmpeg -y -v -8 -f image2 -framerate {} \
+                -i "./tmp_frames/frame_%07d.png" -vcodec libwebp -lossless 0 -q:v 80 -loop 0 -an -vsync 0 \
+                    "{}.webp"'.format(fps, name), shell=True, check=True)
+            print("\nWEBP created: {}".format(out_video_filename))
+
+        except subprocess.CalledProcessError:
+            print("\nERROR! Failed to export WEBP with FFmpeg")
+            print('\n', sys.exc_info())
+            sys.exit(0)
+    else:
+        try:
+            clips.write_videofile(out_video_filename, codec='libx264', audio_codec='aac', ffmpeg_params=[
+                '-pix_fmt:v', 'yuv420p', '-colorspace:v', 'bt709', '-color_primaries:v', 'bt709',
+                '-color_trc:v', 'bt709', '-color_range:v', 'tv', '-movflags', '+faststart'],
+                                  logger=proglog.TqdmProgressBarLogger(print_messages=False))
+        except Exception as e:
+            print("\nERROR! Failed to export video")
+            print('\n', e)
+            sys.exit(0)
+
+        print('\nDone! {}'.format(out_video_filename))
+
+
+
+
+    
+
+
 
     
 
@@ -389,5 +520,5 @@ if __name__ == "__main__":
     # NOTICE !!!
     # Please consider the `need_crop` parameter accordingly for your test case, default with well aligned faces
     faceSwapping_pipeline(opts.source, opts.target, opts, save_dir=opts.output_dir, 
-                          target_mask = target_mask_seg12, need_crop = True, verbose = opts.verbose,only_target_crop=True) 
+                          target_mask = target_mask_seg12, need_crop = False, verbose = opts.verbose,only_target_crop=True) 
     

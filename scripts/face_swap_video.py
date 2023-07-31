@@ -20,7 +20,7 @@ import subprocess
 sys.path.append(".")
 from moviepy.editor import AudioFileClip, VideoFileClip
 from moviepy.video.io.ImageSequenceClip import ImageSequenceClip
-from src.pretrained.face_vid2vid.driven_demo import init_facevid2vid_pretrained_model, drive_source_demo
+from src.pretrained.face_vid2vid.driven_demo_video import init_facevid2vid_pretrained_model, drive_source_demo,keypoint_transformation
 from src.pretrained.gpen.gpen_demo import init_gpen_pretrained_model, GPEN_demo
 from src.pretrained.face_parsing.face_parsing_demo import init_faceParsing_pretrained_model, faceParsing_demo, vis_parsing_maps
 from src.utils.swap_face_mask import swap_head_mask_revisit_considerGlass
@@ -170,34 +170,38 @@ def swap_comp_style_vector(style_vectors1, style_vectors2, comp_indices=[], belo
     
     return style_vectors
 
-def inference(source, frame,source_and_target_files, opts, save_dir, target_mask=None, need_crop = False, verbose = False, only_target_crop=False):
+def inference(source,kp_source,kp_canonical,he_source, frame,source_and_target_files, opts, save_dir, target_mask=None, need_crop = False, verbose = False, only_target_crop=False):
     # (1) Crop the faces from the source and target and align them, obtaining S and T 
     if only_target_crop:
         crops, orig_images, quads, inv_transforms = crop_and_align_face(source_and_target_files[1:])
         crops = [crop.convert("RGB") for crop in crops]
         T = crops[0]
         # S = Image.open(source).convert("RGB").resize((1024, 1024))
-        S=source
-    elif need_crop:
+        # S=source
+    elif need_crop: 
         crops, orig_images, quads, inv_transforms = crop_and_align_face(source_and_target_files)
         crops = [crop.convert("RGB") for crop in crops]
         S, T = crops
+        # S=[S]
     else:
         # S = Image.open(source).convert("RGB").resize((1024, 1024))
         S=source
         T = Image.fromarray(frame).convert("RGB").resize((1024, 1024))
         crops = [S, T]
-    
-    S_256, T_256 = [resize(np.array(im)/255.0, (256, 256)) for im in [S,T]]  # 256,[0,1] range
+
+    # S_256 =[resize(np.array(im)/255.0, (256, 256)) for im in S]
+    T_256 = resize(np.array(T)/255.0, (256, 256))  # 256,[0,1] range
     T_mask = faceParsing_demo(faceParsing_model, T, convert_to_seg12=True, 
                               model_name = opts.faceParser_name) if target_mask is None else target_mask
     if verbose:
         Image.fromarray(T_mask).save(os.path.join(save_dir,"T_mask.png"))
         T_mask_vis = vis_parsing_maps(T, T_mask)
         Image.fromarray(T_mask_vis).save(os.path.join(save_dir,"T_mask_vis.png"))
+
     
+
     # (2) faceVid2Vid  input & output [0,1] range with RGB
-    predictions = drive_source_demo(S_256, [T_256], generator, kp_detector, he_estimator, estimate_jacobian)
+    predictions = drive_source_demo(source,kp_source,kp_canonical,he_source, [T_256], generator, kp_detector, he_estimator, estimate_jacobian)
     predictions = [(pred*255).astype(np.uint8) for pred in predictions]
     # del generator, kp_detector, he_estimator
     
@@ -255,7 +259,7 @@ def inference(source, frame,source_and_target_files, opts, save_dir, target_mask
         torch_utils.tensor2map(swappped_one_hot[0]).save(os.path.join(save_dir,"swappedMaskVis.png"))
     
     # Texture swapping between face D and face T. Retain the style_vectors of backgroun(0), hair(4), ear_rings(11), eye_glass(10) from target
-    comp_indices = set(range(opts.num_seg_cls)) - {0, 4, 11, 10,8,6}  # 10 glass, 8 neck # change @sanoojan
+    comp_indices = set(range(opts.num_seg_cls)) - {0, 4, 11, 10,8,6, 5}  # 10 glass, 8 neck # change @sanoojan
     swapped_style_vectors =  swap_comp_style_vector(target_style_vector, driven_style_vector, list(comp_indices), belowFace_interpolation=False)
     if verbose:
         torch.save(swapped_style_vectors, os.path.join(save_dir,"swapped_style_vec.pt"))
@@ -274,7 +278,7 @@ def inference(source, frame,source_and_target_files, opts, save_dir, target_mask
     #
     # Gaussian blending with mask
     outer_dilation = 5  
-    mask_bg = logical_or_reduce(*[swapped_msk == clz for clz in [0,11, 4 ,8, 7   ]])  # change here@sanoojan  #For face swapping in video，condisder 4,8,7 as part of background.  11 earings 4 hair 8 neck 7 ear
+    mask_bg = logical_or_reduce(*[swapped_msk == clz for clz in [0,11, 4, 10 ,8, 7   ]])  # change here@sanoojan  #For face swapping in video，condisder 4,8,7 as part of background.  11 earings 4 hair 8 neck 7 ear
     is_foreground = torch.logical_not(mask_bg)
     hole_index = hole_map[None][None] == 255
     is_foreground[hole_index[None]] = True
@@ -356,8 +360,16 @@ def faceSwapping_pipeline(source, target, opts, save_dir, target_mask=None, need
     """
     os.makedirs(save_dir, exist_ok=True)
     input_video=target
-    target="example/input/faceswap/temp_target.jpg"
-    source_and_target_files = [source, target]
+    target=os.path.join(save_dir,'temp_target.jpg')
+    
+    if os.path.isdir(source):
+        source_first_file = os.path.join(source, os.listdir(source)[0])
+        source = [os.path.join(source, f) for f in os.listdir(source)]
+    else:
+        source_first_file = source
+        source=[source]
+    # here the source files are always list of files
+    source_and_target_files = [source_first_file, target]
 
     source_and_target_files = [(os.path.basename(f).split('.')[0], f) for f in source_and_target_files]
     result_name = "swap_%s_to_%s.mp4"%(source_and_target_files[0][0], source_and_target_files[1][0])
@@ -389,18 +401,37 @@ def faceSwapping_pipeline(source, target, opts, save_dir, target_mask=None, need
     os.makedirs(temp_results_dir, exist_ok=True)
 
     source_z = None
-    S = Image.open(source).convert("RGB").resize((1024, 1024))
+    S = list(Image.open(s).convert("RGB").resize((1024, 1024)) for s in source)
+    S_256 =[resize(np.array(im)/255.0, (256, 256)) for im in S]
+    #make source_kp_source from S_256
+    # S_256=S_256[0]
+    with torch.no_grad():
+        source = [torch.tensor(S_256_[np.newaxis].astype(np.float32)).permute(0, 3, 1, 2).cuda() for S_256_ in S_256]
+        # driving = torch.tensor(np.array(driving_video)[np.newaxis].astype(np.float32)).permute(0, 4, 1, 2, 3)
+        kp_canonical = [kp_detector(source_) for source_ in source]
+        he_source = [he_estimator(source_) for source_ in source]
+        kp_source = [keypoint_transformation(kp_canonical_, he_source_, estimate_jacobian) for kp_canonical_, he_source_ in zip(kp_canonical, he_source)]
+
+
     for frame_index in tqdm(range(frame_count)):
         ret, frame = video.read()
         if ret:
             #write frame to file
-            # if(frame_index < 550):
+            # if(frame_index < 1087):
             #     continue
+            if(frame_index ==103):
+                cv2.imwrite(os.path.join(save_dir,'temp_target_103.jpg'),frame)
             # cv2.imwrite('example/input/faceswap/temp_target.jpg',cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
             cv2.imwrite(os.path.join(save_dir,'temp_target.jpg'),frame)
+            # try:
             
-            pasted_image=inference(S, frame,source_and_target_files, opts, save_dir, target_mask=target_mask, need_crop = need_crop, verbose = verbose, only_target_crop=only_target_crop)
-            
+            pasted_image=inference(source,kp_source,kp_canonical, he_source,frame,source_and_target_files, opts, save_dir, target_mask=target_mask, need_crop = need_crop, verbose = verbose, only_target_crop=only_target_crop)
+            # except Exception:
+            #     print('Exception')
+            #     pasted_image = frame
+
+                
+                
             cv2.imwrite(os.path.join(temp_results_dir, 'frame_{:0>7d}.png'.format(frame_index)), cv2.cvtColor(np.asarray(pasted_image), cv2.COLOR_BGR2RGB))
             # _, source_z = run_inference(opt, face, frame, RetinaFace, ArcFace, FaceDancer,
             #                             os.path.join('./tmp_frames', 'frame_{:0>7d}.png'.format(frame_index)),
@@ -410,7 +441,7 @@ def faceSwapping_pipeline(source, target, opts, save_dir, target_mask=None, need
             # exit()
     video.release()
 
-    path = os.path.join('./tmp_frames', '*.png')
+    path = os.path.join(temp_results_dir, '*.png')
     image_filenames = sorted(glob.glob(path))
     clips = ImageSequenceClip(image_filenames, fps=fps)
     name = os.path.splitext(out_video_filename)[0]
@@ -458,9 +489,6 @@ def faceSwapping_pipeline(source, target, opts, save_dir, target_mask=None, need
         print('\nDone! {}'.format(out_video_filename))
 
 
-
-
-    
 
 
 
@@ -522,3 +550,4 @@ if __name__ == "__main__":
     faceSwapping_pipeline(opts.source, opts.target, opts, save_dir=opts.output_dir, 
                           target_mask = target_mask_seg12, need_crop = False, verbose = opts.verbose,only_target_crop=True) 
     
+
