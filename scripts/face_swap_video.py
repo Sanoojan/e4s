@@ -417,22 +417,22 @@ def faceSwapping_pipeline(source, target, opts, save_dir, target_mask=None, need
         ret, frame = video.read()
         if ret:
             #write frame to file
-            # if(frame_index < 1087):
-            #     continue
+            if(frame_index < 1087):
+                continue
             if(frame_index ==103):
                 cv2.imwrite(os.path.join(save_dir,'temp_target_103.jpg'),frame)
             # cv2.imwrite('example/input/faceswap/temp_target.jpg',cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
             cv2.imwrite(os.path.join(save_dir,'temp_target.jpg'),frame)
-            # try:
+            try:
             
-            pasted_image=inference(source,kp_source,kp_canonical, he_source,frame,source_and_target_files, opts, save_dir, target_mask=target_mask, need_crop = need_crop, verbose = verbose, only_target_crop=only_target_crop)
-            # except Exception:
-            #     print('Exception')
-            #     pasted_image = frame
+                pasted_image=inference(source,kp_source,kp_canonical, he_source,frame,source_and_target_files, opts, save_dir, target_mask=target_mask, need_crop = need_crop, verbose = verbose, only_target_crop=only_target_crop)
+            except Exception:
+                print('Exception')
+                pasted_image = frame
 
                 
                 
-            cv2.imwrite(os.path.join(temp_results_dir, 'frame_{:0>7d}.png'.format(frame_index)), cv2.cvtColor(np.asarray(pasted_image), cv2.COLOR_BGR2RGB))
+            cv2.imwrite(os.path.join(temp_results_dir,'temp_results', 'frame_{:0>7d}.png'.format(frame_index)), cv2.cvtColor(np.asarray(pasted_image), cv2.COLOR_BGR2RGB))
             # _, source_z = run_inference(opt, face, frame, RetinaFace, ArcFace, FaceDancer,
             #                             os.path.join('./tmp_frames', 'frame_{:0>7d}.png'.format(frame_index)),
             #      
