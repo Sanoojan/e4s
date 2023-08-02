@@ -1,0 +1,1 @@
+python scripts/face_swap.py --source=example/input/faceswap/peng/peng_800.jpg  --target=example/input/faceswap/andy.jpg --verbose=True

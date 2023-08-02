@@ -3,6 +3,8 @@ import glob
 import os
 from PIL import Image
 from tqdm import tqdm
+import sys
+sys.path.append(".")
 from src.pretrained.face_parsing.face_parsing_demo import init_faceParsing_pretrained_model, faceParsing_demo, vis_parsing_maps
 
 

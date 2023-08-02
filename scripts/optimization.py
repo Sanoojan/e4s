@@ -20,7 +20,6 @@ from src.models.networks import Net3
 from src.options.optim_options import OptimOptions
 from src.datasets.dataset import CelebAHQDataset, get_transforms, TO_TENSOR, NORMALIZE, MASK_CONVERT_TF, MASK_CONVERT_TF_DETAILED, FFHQ_MASK_CONVERT_TF_DETAILED
 from src.models.networks import Net3
-from src.options.optim_options import OptimOptions
 from src.criteria.id_loss import IDLoss
 from src.criteria.lpips.lpips import LPIPS
 from src.criteria.style_loss import StyleLoss

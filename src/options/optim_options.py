@@ -47,7 +47,7 @@ class OptimOptions:
 		self.parser.add_argument('--face_parsing_lambda', default=0.1, type=float, help='Face parsing loss multiplier factor')		
 		self.parser.add_argument('--l2_lambda', default=1.0, type=float, help='L2 loss multiplier factor')
 		# self.parser.add_argument('--ir_se50_path', default='./pretrained_ckpts/auxiliray/model_ir_se50.pth', type=str, help='Path to ir_se50 model weights')    
-		self.parser.add_argument('--ir_se50_path', default='/share/users/sanoojan/BlendFace/checkpoints/blendface.pt', type=str, help='Path to ir_se50 model weights')    
+		self.parser.add_argument('--ir_se50_path', default='pretrained_ckpts/blendface/blendface.pt', type=str, help='Path to ir_se50 model weights')    
 		self.parser.add_argument('--face_parsing_model_path', default='./pretrained_ckpts/auxiliray/model.pth', type=str, help='Path to face parsing model weights')
 	
 	def parse(self):

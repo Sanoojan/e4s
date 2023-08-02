@@ -18,10 +18,10 @@ class TrainOptions:
         # ================= Dataset =====================
 		self.parser.add_argument('--celeba_dataset_root', default='./data/CelebAMask-HQ', type=str, help='CelebAMask-HQ dataset root path')
 		self.parser.add_argument('--ffhq_dataset_root', default='./data/FFHQ', type=str, help='FFHQ dataset root path')
-		self.parser.add_argument('--dataset_name', default='celeba', type=str, help='which dataset to use')
+		self.parser.add_argument('--dataset_name', default='ffhq', type=str, help='which dataset to use')
 		self.parser.add_argument('--flip_p', default=0.5, type=float, help='probalility to apply horizontal flipping')
 		self.parser.add_argument('--ds_frac', default=1.0, type=float, help='dataset fraction')
-		self.parser.add_argument('--batch_size', default=2, type=int, help='Batch size for training')
+		self.parser.add_argument('--batch_size', default=8, type=int, help='Batch size for training')
 		self.parser.add_argument('--test_batch_size', default=2, type=int, help='Batch size for testing and inference')
 		self.parser.add_argument('--workers', default=4, type=int, help='Number of train dataloader workers')
 		self.parser.add_argument('--test_workers', default=4, type=int, help='Number of test/inference dataloader workers')
@@ -31,8 +31,8 @@ class TrainOptions:
 		self.parser.add_argument('--optim_name', default='adam', type=str, help='Which optimizer to use')
 		self.parser.add_argument('--train_G', default=True, type=bool, help='Whether to train the styleGAN model')
 		self.parser.add_argument('--train_D', default=True, type=bool,help='Whether to train the styleGAN Discrininator')   
-		# self.parser.add_argument('--device', default='cuda:0', type=str, help='Which GPU(s) to use')
-		self.parser.add_argument('--dist_train', default=True, type=bool, help='distributed training')
+		self.parser.add_argument('--device', default='cuda:0', type=str, help='Which GPU(s) to use')
+		self.parser.add_argument('--dist_train', default=False, type=bool, help='distributed training')
 		self.parser.add_argument('--local_rank', default=-1, type=int, help='local rank for distributed training')
 		self.parser.add_argument('--d_reg_every', default=-1, type=int, help='interval of the applying r1 regularization')
 		self.parser.add_argument('--d_every', default=15, type=int, help='interval of the updating discriminator')
@@ -59,7 +59,7 @@ class TrainOptions:
 		self.parser.add_argument('--style_loss_norm', default=1, type=int, help='whether to normalize the [-1, 1] image to ImageNet in style loss')
   
         # ================== styleGAN2 ==================
-		self.parser.add_argument('--stylegan_weights', default='./pretrained_ckpts/stylegan2-ffhq-config-f.pt', type=str, help='Path to StyleGAN model weights')
+		self.parser.add_argument('--stylegan_weights', default='./pretrained_ckpts/stylegan2/stylegan2-ffhq-config-f.pt', type=str, help='Path to StyleGAN model weights')
 		self.parser.add_argument('--learn_in_w', action='store_true', help='Whether to learn in w space instead of w+')
 		self.parser.add_argument('--start_from_latent_avg', action='store_true',default=True, help='Whether to add average latent vector to generate codes from encoder.')
 		self.parser.add_argument('--output_size', default=1024, type=int, help='Output size of generator')
@@ -67,7 +67,7 @@ class TrainOptions:
 
         # auxiliary models
 		# self.parser.add_argument('--ir_se50_path', default='./pretrained_ckpts/auxiliray/model_ir_se50.pth', type=str, help='Path to ir_se50 model weights')
-		self.parser.add_argument('--ir_se50_path', default='/share/users/sanoojan/BlendFace/checkpoints/blendface.pt', type=str, help='Path to ir_se50 model weights')
+		self.parser.add_argument('--ir_se50_path', default='pretrained_ckpts/blendface/blendface.pt', type=str, help='Path to ir_se50 model weights')
 		self.parser.add_argument('--face_parsing_model_path', default='./pretrained_ckpts/auxiliray/model.pth', type=str, help='Path to face parsing model weights')
 		self.parser.add_argument('--checkpoint_path', default=None, type=str, help='Path to model checkpoint')
 		

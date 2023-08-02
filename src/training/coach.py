@@ -326,16 +326,26 @@ class Coach:
                 # self.opts.train_G and self.opts.train_D should be both true or false
                 if self.opts.train_G and self.opts.train_D:  
                     torch_utils.requires_grad(self.net, True)
-                    torch_utils.requires_grad(self.net.module.G.style, False)  # fix z-to-W mapping of original StyleGAN
+                    if self.opts.dist_train:
+                        torch_utils.requires_grad(self.net.module.G.style, False)  # fix z-to-W mapping of original StyleGAN
+                        if self.opts.remaining_layer_idx != 17:
+                            torch_utils.requires_grad(self.net.module.G.convs[-(17-self.opts.remaining_layer_idx):],False)
+                            torch_utils.requires_grad(self.net.module.G.to_rgbs[-(17-self.opts.remaining_layer_idx)//2 - 1:],False)
+                    else:
+                        torch_utils.requires_grad(self.net.G.style, False)  # fix z-to-W mapping of original StyleGAN
+                        if self.opts.remaining_layer_idx != 17:
+                            torch_utils.requires_grad(self.net.G.convs[-(17-self.opts.remaining_layer_idx):],False)
+                            torch_utils.requires_grad(self.net.G.to_rgbs[-(17-self.opts.remaining_layer_idx)//2 - 1:],False)
                     
-                    if self.opts.remaining_layer_idx != 17:
-                        torch_utils.requires_grad(self.net.module.G.convs[-(17-self.opts.remaining_layer_idx):],False)
-                        torch_utils.requires_grad(self.net.module.G.to_rgbs[-(17-self.opts.remaining_layer_idx)//2 - 1:],False)
+                    
                 
                 # only training Encoder
                 elif not self.opts.train_G and not self.opts.train_D:  
-                    torch_utils.requires_grad(self.net.module.G, False)
-                
+                    if self.opts.dist_train:
+                        torch_utils.requires_grad(self.net.module.G, False)
+                    else:
+                        torch_utils.requires_grad(self.net.G, False)
+                        
                 if self.opts.train_D:
                     torch_utils.requires_grad(self.D, False)  
                 
