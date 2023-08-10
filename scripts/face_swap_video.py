@@ -430,9 +430,9 @@ def faceSwapping_pipeline(source, target, opts, save_dir, target_mask=None, need
                 print('Exception')
                 pasted_image = frame
 
+            # print("path: ",os.path.join(temp_results_dir,'frame_{:0>7d}.png'.format(frame_index)))
                 
-                
-            cv2.imwrite(os.path.join(temp_results_dir,'temp_results', 'frame_{:0>7d}.png'.format(frame_index)), cv2.cvtColor(np.asarray(pasted_image), cv2.COLOR_BGR2RGB))
+            cv2.imwrite(os.path.join(temp_results_dir,'frame_{:0>7d}.png'.format(frame_index)), cv2.cvtColor(np.asarray(pasted_image), cv2.COLOR_BGR2RGB))
             # _, source_z = run_inference(opt, face, frame, RetinaFace, ArcFace, FaceDancer,
             #                             os.path.join('./tmp_frames', 'frame_{:0>7d}.png'.format(frame_index)),
             #      
