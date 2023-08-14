@@ -24,9 +24,50 @@ from src.training.ranger import Ranger
 from src.models.networks import Net3
 from src.models.stylegan2.model import Generator,Discriminator
 from src.utils import torch_utils
+import sys
+sys.path.append("/home/sb1/sanoojan/latent-diffusion")
+#From latent_diffusion
+import argparse, os, sys, glob
+from omegaconf import OmegaConf
+from PIL import Image
+from tqdm import tqdm
+import numpy as np
+import torch
+
+
+from main import instantiate_from_config
+from ldm.models.diffusion.ddim import DDIMSampler
+
+
 
 
 ACCUM = 0.5 ** (32 / (100 * 1000))  #  0.9977843871238888
+
+def make_batch(image, mask, device):
+    # image = np.array(Image.open(image).convert("RGB"))
+    # image = image.astype(np.float32)/255.0
+    # image = image[None].transpose(0,3,1,2)
+    # image = torch.from_numpy(image)
+    #reshape to 512x512
+    image = torch.nn.functional.interpolate(image, size=(512,512))
+
+    # mask = np.array(Image.open(mask).convert("L"))
+    # mask = mask.astype(np.float32)/255.0
+    # mask = mask[None,None]
+    mask[mask < 0.5] = 0
+    mask[mask >= 0.5] = 1
+    # mask = torch.from_numpy(mask)
+
+    masked_image = (1-mask)*image
+
+    batch = {"image": image, "mask": mask, "masked_image": masked_image}
+    #save masked image
+    Image.fromarray((masked_image.cpu().numpy().transpose(0,2,3,1)[0]*255).astype(np.uint8)).save("masked.png")
+    for k in batch:
+        batch[k] = batch[k].to(device=device)
+        batch[k] = batch[k]*2.0-1.0
+    return batch
+
 
 class Coach:
      
@@ -57,6 +98,64 @@ class Coach:
         
         self.opts.device=self.device
 
+        # Initialize diffusion
+        # masks = sorted(glob.glob(os.path.join(opt.indir, "*_mask.png")))
+        # images = [x.replace("_mask.png", ".jpg") for x in masks]
+
+
+        config = OmegaConf.load("/home/sb1/sanoojan/latent-diffusion/models/ldm/inpainting_big/config.yaml")
+        model = instantiate_from_config(config.model)
+        model.load_state_dict(torch.load("/home/sb1/sanoojan/latent-diffusion/models/ldm/inpainting_big/last.ckpt")["state_dict"],
+                            strict=False)
+
+        device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+        self.model = model.to(device)
+        self.sampler = DDIMSampler(self.model)
+
+        # os.makedirs(opt.outdir, exist_ok=True)
+        # with torch.no_grad():
+        #     with model.ema_scope():
+        #         for image, mask in tqdm(zip(images, masks)):
+        #             outpath = os.path.join(opt.outdir, os.path.split(image)[1])
+        #             batch = make_batch(image, mask, device=device)
+
+        #             # encode masked image and concat downsampled mask
+        #             c = model.cond_stage_model.encode(batch["masked_image"]) # Shape: 1, 4, 128, 128
+
+        #             cc = torch.nn.functional.interpolate(batch["mask"],
+        #                                                 size=c.shape[-2:])  # Shape: 1, 1, 128, 128
+        #             c = torch.cat((c, cc), dim=1)   # Shape: 1, 5, 128, 128
+        #             # breakpoint()
+
+        #             shape = (c.shape[1]-1,)+c.shape[2:]
+        #             samples_ddim, _ = sampler.sample(S=opt.steps,
+        #                                             conditioning=c,
+        #                                             batch_size=c.shape[0],
+        #                                             shape=shape,
+        #                                             verbose=False)
+        #             x_samples_ddim = model.decode_first_stage(samples_ddim)
+
+        #             image = torch.clamp((batch["image"]+1.0)/2.0,
+        #                                 min=0.0, max=1.0)
+        #             mask = torch.clamp((batch["mask"]+1.0)/2.0,
+        #                             min=0.0, max=1.0)
+        #             predicted_image = torch.clamp((x_samples_ddim+1.0)/2.0,
+        #                                         min=0.0, max=1.0)
+        #             Image.fromarray((predicted_image.cpu().numpy().transpose(0,2,3,1)[0]*255).astype(np.uint8)).save("predicted.png")
+        #             inpainted = (1-mask)*image+mask*predicted_image
+        #             inpainted = inpainted.cpu().numpy().transpose(0,2,3,1)[0]*255
+        #             Image.fromarray(inpainted.astype(np.uint8)).save(outpath)
+                
+
+        ########################
+
+
+
+
+
+
+
+
         # ==== Initialize network ====
         self.net = Net3(self.opts)
         # print(self.device)
@@ -67,6 +166,7 @@ class Coach:
         torch_utils.accumulate(self.net_ema,self.net, 0)
         
         if self.opts.train_D:
+            
             self.D = Discriminator(self.opts.out_size).to(self.device).eval()
     
         if self.opts.dist_train:
@@ -231,7 +331,8 @@ class Coach:
         
                 
     def configure_optimizers(self):
-        self.params=list(filter(lambda p: p.requires_grad ,list(self.net.parameters())))
+        # self.params=list(filter(lambda p: p.requires_grad ,list(self.net.parameters())))
+        self.params=list(filter(lambda p: p.requires_grad ,list(self.model.parameters())))
         self.params_D=list(filter(lambda p: p.requires_grad ,list(self.D.parameters()))) if self.opts.train_D else None
         
         d_reg_ratio = self.opts.d_reg_every / (self.opts.d_reg_every + 1) if self.opts.d_reg_every >0 else 1
@@ -275,7 +376,8 @@ class Coach:
 
     # @torch.no_grad()
     def train(self):
-        self.net.train()
+        # self.net.train()
+        self.model.train()
         if self.opts.train_D:
             self.D.train()
         
@@ -288,14 +390,53 @@ class Coach:
                 # [bs,1,H,W] format mask to one-hot，i.e., [bs,#seg_cls,H,W]
                 onehot = torch_utils.labelMap2OneHot(mask, num_cls=self.opts.num_seg_cls)
                 # breakpoint()
-                # ============ update D ===============
-                if self.opts.train_D and (self.global_step % self.opts.d_every == 0):
+
+                
+                # Image.fromarray((predicted_image.cpu().numpy().transpose(0,2,3,1)[0]*255).astype(np.uint8)).save("predicted.png")
+                # inpainted = (1-mask)*image+mask*predicted_image
+                # inpainted = inpainted.cpu().numpy().transpose(0,2,3,1)[0]*255
+
+
+
+                # ============ update D =============== 
+                # breakpoint()
+                if self.opts.train_D and (self.global_step % self.opts.d_every == 0):   # Default True @ Sanoojan
                     torch_utils.requires_grad(self.net, False)
                     torch_utils.requires_grad(self.D, True)
-                
-                    recon1, _, latent = self.net(img, onehot, return_latents=True)
-                    fake_pred_1 = self.D(recon1)
-                    real_pred = self.D(img)
+                    # img shape [bs,3,1024,1024]  onehot shape [bs,12,512,512]  12->#seg_cls
+                    # recon1, _, latent = self.net(img, onehot, return_latents=True)  # recon1: [bs,3,H,W] e.g., 8,3,1024,1024 for FFHQ  latent: [bs,12,18,512]
+                    
+
+                    #Diffusion
+                    batch = make_batch(img, mask, device=self.device)
+                    # encode masked image and concat downsampled mask
+                    c1 = self.model.cond_stage_model.encode(batch["masked_image"]) # Shape: 1, 4, 128, 128
+
+                    cc = torch.nn.functional.interpolate(batch["mask"],
+                                                        size=c1.shape[-2:])  # Shape: 1, 1, 128, 128
+                    c1= torch.cat((c1, cc), dim=1)   # Shape: 1, 5, 128, 128
+                    # breakpoint()
+
+                    shape = (c1.shape[1]-1,)+c1.shape[2:]
+                    steps=50
+                    samples_ddim, latent = self.sampler.sample(S=steps,
+                                                    conditioning=c1,
+                                                    batch_size=c1.shape[0],
+                                                    shape=shape,
+                                                    verbose=False)
+                    x_samples_ddim = self.model.decode_first_stage(samples_ddim)
+
+                    image = torch.clamp((batch["image"]+1.0)/2.0,
+                                        min=0.0, max=1.0)
+                    mask = torch.clamp((batch["mask"]+1.0)/2.0,
+                                    min=0.0, max=1.0)
+                    recon1 = torch.clamp((x_samples_ddim+1.0)/2.0,         # Shape: B, 3, 512, 512
+                                                min=0.0, max=1.0)
+
+                    #Diffusion end
+
+                    fake_pred_1 = self.D(recon1)   # [bs,1]
+                    real_pred = self.D(img)         # [bs,1]
                     
                     d_loss = self.adv_d_loss(real_pred,fake_pred_1)
                     
@@ -324,9 +465,9 @@ class Coach:
                 
                 # ============ update G ===============
                 # self.opts.train_G and self.opts.train_D should be both true or false
-                if self.opts.train_G and self.opts.train_D:  
+                if self.opts.train_G and self.opts.train_D:   # Default True @ Sanoojan
                     torch_utils.requires_grad(self.net, True)
-                    if self.opts.dist_train:
+                    if self.opts.dist_train:    # Default False @ Sanoojan
                         torch_utils.requires_grad(self.net.module.G.style, False)  # fix z-to-W mapping of original StyleGAN
                         if self.opts.remaining_layer_idx != 17:
                             torch_utils.requires_grad(self.net.module.G.convs[-(17-self.opts.remaining_layer_idx):],False)
@@ -349,7 +490,34 @@ class Coach:
                 if self.opts.train_D:
                     torch_utils.requires_grad(self.D, False)  
                 
-                recon1, _, latent = self.net(img, onehot, return_latents=True)
+                # recon1, _, latent = self.net(img, onehot, return_latents=True)
+
+                #Diffusion
+                batch = make_batch(img, mask, device=self.device)
+                # encode masked image and concat downsampled mask
+                c1 = self.model.cond_stage_model.encode(batch["masked_image"]) # Shape: 1, 4, 128, 128
+
+                cc = torch.nn.functional.interpolate(batch["mask"],
+                                                    size=c1.shape[-2:])  # Shape: 1, 1, 128, 128
+                c1= torch.cat((c1, cc), dim=1)   # Shape: 1, 5, 128, 128
+                # breakpoint()
+
+                shape = (c1.shape[1]-1,)+c1.shape[2:]
+                steps=50
+                samples_ddim, latent = self.sampler.sample(S=steps,
+                                                conditioning=c1,
+                                                batch_size=c1.shape[0],
+                                                shape=shape,
+                                                verbose=False)
+                x_samples_ddim = self.model.decode_first_stage(samples_ddim)
+
+                image = torch.clamp((batch["image"]+1.0)/2.0,
+                                    min=0.0, max=1.0)
+                mask = torch.clamp((batch["mask"]+1.0)/2.0,
+                                min=0.0, max=1.0)
+                recon1 = torch.clamp((x_samples_ddim+1.0)/2.0,         # Shape: B, 3, 512, 512
+                                            min=0.0, max=1.0)
+                # Diffusion end  
                 
                 g_loss = torch.tensor(0.0, device=self.device)                
                 if self.opts.train_D:
@@ -550,7 +718,33 @@ class Coach:
                 # [bs,1,H,W] format mask to one-hot, i.e., [bs,#seg_cls,H,W]
                 onehot = torch_utils.labelMap2OneHot(mask, num_cls=self.opts.num_seg_cls)
                 
-                recon1, _, latent = self.net(img, onehot, return_latents=True)    
+                # recon1, _, latent = self.net(img, onehot, return_latents=True) 
+                batch = make_batch(img, mask, device=self.device)
+                    # encode masked image and concat downsampled mask
+                c1 = self.model.cond_stage_model.encode(batch["masked_image"]) # Shape: 1, 4, 128, 128
+
+                cc = torch.nn.functional.interpolate(batch["mask"],
+                                                    size=c1.shape[-2:])  # Shape: 1, 1, 128, 128
+                c1= torch.cat((c1, cc), dim=1)   # Shape: 1, 5, 128, 128
+                # breakpoint()
+
+                shape = (c1.shape[1]-1,)+c1.shape[2:]
+                steps=50
+                samples_ddim, latent = self.sampler.sample(S=steps,
+                                                conditioning=c1,
+                                                batch_size=c1.shape[0],
+                                                shape=shape,
+                                                verbose=False)
+                x_samples_ddim = self.model.decode_first_stage(samples_ddim)
+
+                image = torch.clamp((batch["image"]+1.0)/2.0,
+                                    min=0.0, max=1.0)
+                mask = torch.clamp((batch["mask"]+1.0)/2.0,
+                                min=0.0, max=1.0)
+                recon1 = torch.clamp((x_samples_ddim+1.0)/2.0,         # Shape: B, 3, 512, 512
+                                            min=0.0, max=1.0)
+
+                #Diffusion end  
                               
                 g_loss = torch.tensor(0.0, device=self.device)                
                 if self.opts.train_D:

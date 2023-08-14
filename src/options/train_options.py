@@ -11,7 +11,7 @@ class TrainOptions:
 		self.parser.add_argument('--exp_dir', type=str, default="running_exp",help='Path to experiment output directory')
 		self.parser.add_argument('--num_seg_cls', type=int, default=12,help='Segmentation mask class number')
         # ================= Model =====================
-		self.parser.add_argument('--out_size', type=int, default=1024, help='output image size') 
+		self.parser.add_argument('--out_size', type=int, default=512, help='output image size')   # changed from 1024 to 512 @sanoojan
 		self.parser.add_argument('--fsencoder_type', type=str, default="psp", help='FS Encode type') 
 		self.parser.add_argument('--remaining_layer_idx', type=int, default=13, help='mask-guided style injection, i.e., K in paper')
   

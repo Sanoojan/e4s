@@ -11,4 +11,4 @@
 
 # python src/utils/create_mask.py
 python scripts/train.py \
-        --exp_dir='running_exp_FFHQ'
+        --exp_dir='running_exp_FFHQ_check'
