@@ -11,7 +11,7 @@ class TrainOptions:
 		self.parser.add_argument('--exp_dir', type=str, default="running_exp",help='Path to experiment output directory')
 		self.parser.add_argument('--num_seg_cls', type=int, default=12,help='Segmentation mask class number')
         # ================= Model =====================
-		self.parser.add_argument('--out_size', type=int, default=512, help='output image size')   # changed from 1024 to 512 @sanoojan
+		self.parser.add_argument('--out_size', type=int, default=1024, help='output image size')   # changed from 1024 to 512 @sanoojan
 		self.parser.add_argument('--fsencoder_type', type=str, default="psp", help='FS Encode type') 
 		self.parser.add_argument('--remaining_layer_idx', type=int, default=13, help='mask-guided style injection, i.e., K in paper')
   
@@ -21,7 +21,7 @@ class TrainOptions:
 		self.parser.add_argument('--dataset_name', default='ffhq', type=str, help='which dataset to use')
 		self.parser.add_argument('--flip_p', default=0.5, type=float, help='probalility to apply horizontal flipping')
 		self.parser.add_argument('--ds_frac', default=1.0, type=float, help='dataset fraction')
-		self.parser.add_argument('--batch_size', default=8, type=int, help='Batch size for training')
+		self.parser.add_argument('--batch_size', default=1, type=int, help='Batch size for training')
 		self.parser.add_argument('--test_batch_size', default=2, type=int, help='Batch size for testing and inference')
 		self.parser.add_argument('--workers', default=4, type=int, help='Number of train dataloader workers')
 		self.parser.add_argument('--test_workers', default=4, type=int, help='Number of test/inference dataloader workers')

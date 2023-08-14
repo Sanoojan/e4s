@@ -376,7 +376,7 @@ class Coach:
 
     # @torch.no_grad()
     def train(self):
-        # self.net.train()
+        # self.net.eval()
         self.model.train()
         if self.opts.train_D:
             self.D.train()
@@ -432,9 +432,10 @@ class Coach:
                                     min=0.0, max=1.0)
                     recon1 = torch.clamp((x_samples_ddim+1.0)/2.0,         # Shape: B, 3, 512, 512
                                                 min=0.0, max=1.0)
-
+                    #reshape to [bs,3,1024,1024]
+                    recon1 = torch.nn.functional.interpolate(recon1, size=(1024,1024), mode='bilinear', align_corners=False)
                     #Diffusion end
-
+                    print("recon1 shape: ", recon1.shape)
                     fake_pred_1 = self.D(recon1)   # [bs,1]
                     real_pred = self.D(img)         # [bs,1]
                     
@@ -517,6 +518,7 @@ class Coach:
                                 min=0.0, max=1.0)
                 recon1 = torch.clamp((x_samples_ddim+1.0)/2.0,         # Shape: B, 3, 512, 512
                                             min=0.0, max=1.0)
+                recon1 = torch.nn.functional.interpolate(recon1, size=(1024,1024), mode='bilinear', align_corners=False)
                 # Diffusion end  
                 
                 g_loss = torch.tensor(0.0, device=self.device)                
@@ -743,7 +745,7 @@ class Coach:
                                 min=0.0, max=1.0)
                 recon1 = torch.clamp((x_samples_ddim+1.0)/2.0,         # Shape: B, 3, 512, 512
                                             min=0.0, max=1.0)
-
+                recon1 = torch.nn.functional.interpolate(recon1, size=(1024,1024), mode='bilinear', align_corners=False)
                 #Diffusion end  
                               
                 g_loss = torch.tensor(0.0, device=self.device)                

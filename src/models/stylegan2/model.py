@@ -779,6 +779,7 @@ class Discriminator(nn.Module):
         )
 
     def forward(self, input):
+        # breakpoint()
         out = self.convs(input)
 
         batch, channel, height, width = out.shape
