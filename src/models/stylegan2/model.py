@@ -779,7 +779,8 @@ class Discriminator(nn.Module):
         )
 
     def forward(self, input):
-        out = self.convs(input)
+        # breakpoint()
+        out = self.convs(input)  # input: [batch, 3, 1024, 1024] self.convs: [batch, 512, 4, 4]
 
         batch, channel, height, width = out.shape
         group = min(batch, self.stddev_group)
@@ -793,7 +794,8 @@ class Discriminator(nn.Module):
 
         out = self.final_conv(out)
 
-        out = out.view(batch, -1)
-        out = self.final_linear(out)
+        out = out.view(batch, -1)  # [batch, 8192]
+        # breakpoint()
+        out = self.final_linear(out) # [batch,512,4,4]
 
         return out

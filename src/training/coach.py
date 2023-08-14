@@ -294,6 +294,8 @@ class Coach:
                     torch_utils.requires_grad(self.D, True)
                 
                     recon1, _, latent = self.net(img, onehot, return_latents=True)
+                    print("recon1 shape: ", recon1.shape)
+                    print("latent shape: ", latent.shape)
                     fake_pred_1 = self.D(recon1)
                     real_pred = self.D(img)
                     
