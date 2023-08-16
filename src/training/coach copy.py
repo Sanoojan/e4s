@@ -52,7 +52,7 @@ def dict2namespace(config):
     return namespace
 
 with open(os.path.join("ddim/configs", config_file), "r") as f:
-    config = yaml.safe_load(f)
+        config = yaml.safe_load(f)
 new_config = dict2namespace(config)
 
 def get_beta_schedule(beta_schedule, *, beta_start, beta_end, num_diffusion_timesteps):
@@ -122,8 +122,8 @@ class Coach:
         self.model = Model(new_config)
         self.model= self.model.to(self.device)
         self.model.train()
-        self.net_ema = EMAHelper(mu=new_config.model.ema_rate)
-        self.net_ema.register(self.model)
+        ema_helper = EMAHelper(mu=new_config.model.ema_rate)
+        ema_helper.register(self.model)
         betas = get_beta_schedule(
             beta_schedule=new_config.diffusion.beta_schedule,
             beta_start=new_config.diffusion.beta_start,
@@ -135,30 +135,31 @@ class Coach:
         
         #Diffusion end
         
-     
+        self.net = Net3(self.opts)
         # print(self.device)
-      
-
-        # self.net_ema = Net3(self.opts).to(self.device).eval()
-        # torch_utils.accumulate(self.net_ema,self.net, 0)
+        self.net = nn.SyncBatchNorm.convert_sync_batchnorm(self.net)
+        self.net = self.net.to(self.device)
+        
+        self.net_ema = Net3(self.opts).to(self.device).eval()
+        torch_utils.accumulate(self.net_ema,self.net, 0)
         
         if self.opts.train_D:
             self.D = Discriminator(self.opts.out_size).to(self.device).eval()
     
-        # if self.opts.dist_train:
-        #     # Wrap the model
-        #     self.net = nn.parallel.DistributedDataParallel(self.net,
-        #     device_ids=[self.local_rank], output_device=self.local_rank,
-        #     broadcast_buffers=False, 
-        #     find_unused_parameters=True
-        #     )
+        if self.opts.dist_train:
+            # Wrap the model
+            self.net = nn.parallel.DistributedDataParallel(self.net,
+            device_ids=[self.local_rank], output_device=self.local_rank,
+            broadcast_buffers=False, 
+            find_unused_parameters=True
+            )
 
-        #     if self.opts.train_D: 
-        #         self.D = nn.parallel.DistributedDataParallel(self.D,
-        #         device_ids=[self.local_rank], output_device=self.local_rank,
-        #         broadcast_buffers=False,
-        #         find_unused_parameters=True
-        #         )
+            if self.opts.train_D: 
+                self.D = nn.parallel.DistributedDataParallel(self.D,
+                device_ids=[self.local_rank], output_device=self.local_rank,
+                broadcast_buffers=False,
+                find_unused_parameters=True
+                )
             
         # resume
         if self.opts.checkpoint_path is not None:
@@ -166,13 +167,13 @@ class Coach:
             self.global_step = ckpt_dict["opts"]["max_steps"] + 1
             
             if self.opts.dist_train:    
-                # self.net.module.latent_avg = ckpt_dict['latent_avg'].to(self.device)
-                # self.net.load_state_dict(ckpt_dict["state_dict"])
+                self.net.module.latent_avg = ckpt_dict['latent_avg'].to(self.device)
+                self.net.load_state_dict(ckpt_dict["state_dict"])
                 if self.opts.train_D:
                     self.D.module.load_state_dict(ckpt_dict["D_state_dict"]) 
             else:
-                # self.net.latent_avg = ckpt_dict['latent_avg'].to(self.device)
-                # self.net.load_state_dict(torch_utils.remove_module_prefix(ckpt_dict["state_dict"],prefix="module."))
+                self.net.latent_avg = ckpt_dict['latent_avg'].to(self.device)
+                self.net.load_state_dict(torch_utils.remove_module_prefix(ckpt_dict["state_dict"],prefix="module."))
                 if self.opts.train_D:
                     self.D.load_state_dict(torch_utils.remove_module_prefix(ckpt_dict["D_state_dict"],prefix="module."))
 
@@ -183,41 +184,41 @@ class Coach:
             styleGAN2_ckpt = torch.load(self.opts.stylegan_weights)
             
             if self.opts.dist_train:
-                # self.net.module.G.load_state_dict(styleGAN2_ckpt['g_ema'], strict=False)
+                self.net.module.G.load_state_dict(styleGAN2_ckpt['g_ema'], strict=False)
                 if self.opts.train_D:
                     if self.opts.out_size == 1024:
                         self.D.module.load_state_dict(styleGAN2_ckpt['d'], strict=False) # 1024 resolution
                     else:
                         self.custom_load_D_state_dict(self.D.module, styleGAN2_ckpt['d'])  # load partial D
                 # avg latent code
-                # self.net.module.latent_avg = styleGAN2_ckpt['latent_avg'].to(self.device)    
-                # if self.opts.learn_in_w:
-                #     self.net.module.latent_avg = self.net.module.latent_avg.repeat(1, 1)
-                # else:
-                #     self.net.module.latent_avg = self.net.module.latent_avg.repeat(2 * int(math.log(self.opts.out_size, 2)) -2 , 1)
+                self.net.module.latent_avg = styleGAN2_ckpt['latent_avg'].to(self.device)    
+                if self.opts.learn_in_w:
+                    self.net.module.latent_avg = self.net.module.latent_avg.repeat(1, 1)
+                else:
+                    self.net.module.latent_avg = self.net.module.latent_avg.repeat(2 * int(math.log(self.opts.out_size, 2)) -2 , 1)
             else:
-                # self.net.G.load_state_dict(styleGAN2_ckpt['g_ema'], strict=False)
+                self.net.G.load_state_dict(styleGAN2_ckpt['g_ema'], strict=False)
                 if self.opts.train_D:
                     if self.opts.out_size == 1024:
                         self.D.load_state_dict(styleGAN2_ckpt['d'], strict=False) # 1024 resolution
                     else:
                         self.custom_load_D_state_dict(self.D, styleGAN2_ckpt['d']) # load partial D
                 # avg latent code
-                # self.net.latent_avg = styleGAN2_ckpt['latent_avg'].to(self.device)    
-                # if self.opts.learn_in_w:
-                #     self.net.latent_avg = self.net.latent_avg.repeat(1, 1)
-                # else:
-                #     self.net.latent_avg = self.net.latent_avg.repeat(2 * int(math.log(self.opts.out_size, 2)) -2 , 1)
+                self.net.latent_avg = styleGAN2_ckpt['latent_avg'].to(self.device)    
+                if self.opts.learn_in_w:
+                    self.net.latent_avg = self.net.latent_avg.repeat(1, 1)
+                else:
+                    self.net.latent_avg = self.net.latent_avg.repeat(2 * int(math.log(self.opts.out_size, 2)) -2 , 1)
             
             print('Loading pretrained styleGAN2 weights!')
 
         # Estimate latent_avg via dense sampling if latent_avg is not available
-        # if self.opts.dist_train:
-        #     if self.net.module.latent_avg is None:
-        #         self.net.module.latent_avg = self.net.module.G.mean_latent(int(1e5))[0].detach()
-        # else:
-        #     if self.net.latent_avg is None:
-        #         self.net.latent_avg = self.net.G.mean_latent(int(1e5))[0].detach()
+        if self.opts.dist_train:
+            if self.net.module.latent_avg is None:
+                self.net.module.latent_avg = self.net.module.G.mean_latent(int(1e5))[0].detach()
+        else:
+            if self.net.latent_avg is None:
+                self.net.latent_avg = self.net.G.mean_latent(int(1e5))[0].detach()
 
         self.mse_loss = nn.MSELoss().to(self.device).eval()
         if self.opts.lpips_lambda > 0:
@@ -351,8 +352,7 @@ class Coach:
 
     # @torch.no_grad()
     def train(self):
-        # self.net.train()
-        self.model.train()
+        self.net.train()
         if self.opts.train_D:
             self.D.train()
         
@@ -367,7 +367,7 @@ class Coach:
                 # breakpoint()
                 # ============ update D ===============
                 if self.opts.train_D and (self.global_step % self.opts.d_every == 0):
-                    torch_utils.requires_grad(self.model, False)
+                    torch_utils.requires_grad(self.net, False)
                     torch_utils.requires_grad(self.D, True)
                 
                     # recon1, _, latent = self.net(img, onehot, return_latents=True)
@@ -432,26 +432,26 @@ class Coach:
                 # ============ update G ===============
                 # self.opts.train_G and self.opts.train_D should be both true or false
                 if self.opts.train_G and self.opts.train_D:  
-                    torch_utils.requires_grad(self.model, True)
-                    # if self.opts.dist_train:
-                    #     torch_utils.requires_grad(self.net.module.G.style, False)  # fix z-to-W mapping of original StyleGAN
-                    #     if self.opts.remaining_layer_idx != 17:
-                    #         torch_utils.requires_grad(self.net.module.G.convs[-(17-self.opts.remaining_layer_idx):],False)
-                    #         torch_utils.requires_grad(self.net.module.G.to_rgbs[-(17-self.opts.remaining_layer_idx)//2 - 1:],False)
-                    # else:
-                    #     torch_utils.requires_grad(self.net.G.style, False)  # fix z-to-W mapping of original StyleGAN
-                    #     if self.opts.remaining_layer_idx != 17:
-                    #         torch_utils.requires_grad(self.net.G.convs[-(17-self.opts.remaining_layer_idx):],False)
-                    #         torch_utils.requires_grad(self.net.G.to_rgbs[-(17-self.opts.remaining_layer_idx)//2 - 1:],False)
+                    torch_utils.requires_grad(self.net, True)
+                    if self.opts.dist_train:
+                        torch_utils.requires_grad(self.net.module.G.style, False)  # fix z-to-W mapping of original StyleGAN
+                        if self.opts.remaining_layer_idx != 17:
+                            torch_utils.requires_grad(self.net.module.G.convs[-(17-self.opts.remaining_layer_idx):],False)
+                            torch_utils.requires_grad(self.net.module.G.to_rgbs[-(17-self.opts.remaining_layer_idx)//2 - 1:],False)
+                    else:
+                        torch_utils.requires_grad(self.net.G.style, False)  # fix z-to-W mapping of original StyleGAN
+                        if self.opts.remaining_layer_idx != 17:
+                            torch_utils.requires_grad(self.net.G.convs[-(17-self.opts.remaining_layer_idx):],False)
+                            torch_utils.requires_grad(self.net.G.to_rgbs[-(17-self.opts.remaining_layer_idx)//2 - 1:],False)
                     
                     
                 
                 # only training Encoder
-                # elif not self.opts.train_G and not self.opts.train_D:  
-                #     if self.opts.dist_train:
-                #         torch_utils.requires_grad(self.net.module.G, False)
-                #     else:
-                #         torch_utils.requires_grad(self.net.G, False)
+                elif not self.opts.train_G and not self.opts.train_D:  
+                    if self.opts.dist_train:
+                        torch_utils.requires_grad(self.net.module.G, False)
+                    else:
+                        torch_utils.requires_grad(self.net.G, False)
                         
                 if self.opts.train_D:
                     torch_utils.requires_grad(self.D, False)  
@@ -503,8 +503,7 @@ class Coach:
                 loss_dict["loss"] = float(overall_loss)
                 
                 
-              
-                self.model.zero_grad()
+                self.net.zero_grad()
                 overall_loss.backward()
                 self.optimizer.step()
                 
@@ -544,10 +543,10 @@ class Coach:
                         param_group['lr'] = self.opts.learning_rate * 0.1
             
                 # ema
-                # if self.opts.dist_train:
-                #     torch_utils.accumulate(self.net_ema, self.net.module, ACCUM)
-                # else:
-                #     torch_utils.accumulate(self.net_ema, self.net, ACCUM)
+                if self.opts.dist_train:
+                    torch_utils.accumulate(self.net_ema, self.net.module, ACCUM)
+                else:
+                    torch_utils.accumulate(self.net_ema, self.net, ACCUM)
                 
         if self.rank==0:
             print('OMG, finished training!')
@@ -588,18 +587,13 @@ class Coach:
             loss_dict['loss_lpips'] = float(loss_lpips)
             loss += loss_lpips * self.opts.lpips_lambda
         if self.opts.w_norm_lambda > 0:
-            # if self.opts.dist_train:
-            #     loss_w_norm = self.w_norm_loss(latent, self.net.module.latent_avg)
-            # else:
-            #     loss_w_norm = self.w_norm_loss(latent, self.net.latent_avg)
+            if self.opts.dist_train:
+                loss_w_norm = self.w_norm_loss(latent, self.net.module.latent_avg)
+            else:
+                loss_w_norm = self.w_norm_loss(latent, self.net.latent_avg)
                 
-            # loss_dict['loss_w_norm'] = float(loss_w_norm)
-            # loss += loss_w_norm * self.opts.w_norm_lambda  
-            #check here @ sanoojan
-            loss+=0
-
-
-
+            loss_dict['loss_w_norm'] = float(loss_w_norm)
+            loss += loss_w_norm * self.opts.w_norm_lambda
         if self.opts.style_lambda > 0:  # gram matrix loss
             loss_style_1 = self.style_loss(recon1, img, mask_x = (mask==3).float(), mask_x_hat = (mask==3).float())
             
@@ -666,8 +660,8 @@ class Coach:
             'state_dict_ema': self.net_ema.state_dict(),
         }
         # save the latent avg in state_dict for inference if truncation of w was used during training
-        # if self.opts.start_from_latent_avg:
-        #     save_dict['latent_avg'] = self.net.module.latent_avg if self.opts.dist_train else self.net.latent_avg
+        if self.opts.start_from_latent_avg:
+            save_dict['latent_avg'] = self.net.module.latent_avg if self.opts.dist_train else self.net.latent_avg
             
         if self.opts.train_D:
             save_dict['D_state_dict'] = self.D.state_dict()
@@ -681,8 +675,7 @@ class Coach:
         else:
             show_images=False
             
-     
-        self.model.eval()
+        self.net.eval()
         if self.opts.train_D:
             self.D.eval()
         agg_loss_dict = []
@@ -748,7 +741,7 @@ class Coach:
 
             # For first step just do sanity test on small amount of data
             if self.global_step == 0 and batch_idx >= 4:
-                self.model.train()
+                self.net.train()
                 if self.opts.train_D:
                     self.D.train()
                 return None  # Do not log, inaccurate in first batch
@@ -757,7 +750,7 @@ class Coach:
         self.log_metrics(loss_dict, prefix='test')
         self.print_metrics(loss_dict, prefix='test')
 
-        self.model.train()
+        self.net.train()
         if self.opts.train_D:
             self.D.train()
         return loss_dict

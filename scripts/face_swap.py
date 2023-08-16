@@ -28,6 +28,35 @@ from src.options.swap_options import SwapFacePipelineOptions
 from src.models.networks import Net3
 from src.datasets.dataset import TO_TENSOR, NORMALIZE, __celebAHQ_masks_to_faceParser_mask_detailed
 
+import sys
+sys.path.append('/home/sb1/sanoojan/e4s/ddim')
+import yaml
+from ddim.runners.diffusion import Diffusion
+from ddim.models.diffusion import Model
+from ddim.models.ema import EMAHelper
+from ddim.datasets import get_dataset, data_transform, inverse_data_transform
+from ddim.functions.losses import loss_registry
+import argparse
+
+
+config_file='celeba.yml'
+
+
+def dict2namespace(config):
+    namespace = argparse.Namespace()
+    for key, value in config.items():
+        if isinstance(value, dict):
+            new_value = dict2namespace(value)
+        else:
+            new_value = value
+        setattr(namespace, key, new_value)
+    return namespace
+
+with open(os.path.join("ddim/configs", config_file), "r") as f:
+    config = yaml.safe_load(f)
+new_config = dict2namespace(config)
+
+
 
 def create_masks(mask, outer_dilation=0, operation='dilation'):
     radius = outer_dilation
@@ -236,7 +265,7 @@ def faceSwapping_pipeline(source, target, opts, save_dir, target_mask=None, need
     target_onehot = torch_utils.labelMap2OneHot(target_mask, num_cls = opts.num_seg_cls)
     
     # (3) Extract the texture vectors of D and T using RGI
-    driven_style_vector, _ = net.get_style_vectors(driven, driven_onehot) 
+    driven_style_vector, _ = net.get_style_vectors(driven, driven_onehot)  #check this @sanoojan
     target_style_vector, _ = net.get_style_vectors(target, target_onehot)
     if verbose:
         torch.save(driven_style_vector, os.path.join(save_dir,"D_style_vec.pt"))
@@ -372,11 +401,14 @@ if __name__ == "__main__":
     print("Load pre-trained face parsing models success!") 
 
     # E4S model
-    net = Net3(opts)
-    net = net.to(opts.device)
+    # net = Net3(opts)
+    # net = net.to(opts.device)
+    net = Model(new_config)     # Diffusion
+    net= net.to(opts.device)
     save_dict = torch.load(opts.checkpoint_path)
+    
     net.load_state_dict(torch_utils.remove_module_prefix(save_dict["state_dict"], prefix="module."))
-    net.latent_avg = save_dict['latent_avg'].to(opts.device)
+    # model.latent_avg = save_dict['latent_avg'].to(opts.device)
     print("Load E4S pre-trained model success!") 
     # ========================================================  
 

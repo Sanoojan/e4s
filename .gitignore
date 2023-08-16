@@ -21,3 +21,4 @@ running_exp_first/*
 running_exp_FFHQ/*
 env/*
 running_exp_FFHQ_check/*
+running_exp_celeba_diffusion/*
