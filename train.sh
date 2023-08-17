@@ -11,6 +11,6 @@
 
 # python src/utils/create_mask.py
 python scripts/train.py \
-        --exp_dir='running_exp_celeba_diffusion' \
+        --exp_dir='running_exp_celeba_diffusion_combined' \
         --dataset_name='celeba' \
         --out_size=1024 

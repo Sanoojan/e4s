@@ -387,7 +387,7 @@ class Coach:
                     t = torch.cat([t, self.num_timesteps - t - 1], dim=0)[:n]
                     a = (1-b).cumprod(dim=0).index_select(0, t).view(-1, 1, 1, 1)
                     x = x * a.sqrt() + e * (1.0 - a).sqrt()
-                    recon1,latent=self.model(x, t.float())
+                    recon1,latent=self.model.forward_swap(x, t.float())
                     # print("recon1 shape: ", recon1.shape)
                     # if keepdim:
                     #     return (e - output).square().sum(dim=(1, 2, 3))

@@ -401,13 +401,15 @@ if __name__ == "__main__":
     print("Load pre-trained face parsing models success!") 
 
     # E4S model
-    # net = Net3(opts)
-    # net = net.to(opts.device)
-    net = Model(new_config)     # Diffusion
-    net= net.to(opts.device)
+    net = Net3(opts)
+    net = net.to(opts.device)
+    # model = Model(new_config)     # Diffusion
+    # model= model.to(opts.device)
     save_dict = torch.load(opts.checkpoint_path)
-    
+    # save_dict_net=torch.load('/home/sb1/sanoojan/e4s/pretrained_ckpts/e4s/iteration_300000.pt')
     net.load_state_dict(torch_utils.remove_module_prefix(save_dict["state_dict"], prefix="module."))
+    # model.load_state_dict(torch_utils.remove_module_prefix(save_dict["state_dict"], prefix="module."))
+
     # model.latent_avg = save_dict['latent_avg'].to(opts.device)
     print("Load E4S pre-trained model success!") 
     # ========================================================  
