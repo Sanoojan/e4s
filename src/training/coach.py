@@ -35,57 +35,19 @@ from ddim.models.ema import EMAHelper
 from ddim.datasets import get_dataset, data_transform, inverse_data_transform
 from ddim.functions.losses import loss_registry
 import argparse
+from PIL import Image
+from torchvision.utils import save_image
+
+from src.training.support import dict2namespace, get_beta_schedule
 
 ACCUM = 0.5 ** (32 / (100 * 1000))  #  0.9977843871238888
 
 config_file='celeba.yml'
-
-
-def dict2namespace(config):
-    namespace = argparse.Namespace()
-    for key, value in config.items():
-        if isinstance(value, dict):
-            new_value = dict2namespace(value)
-        else:
-            new_value = value
-        setattr(namespace, key, new_value)
-    return namespace
-
 with open(os.path.join("ddim/configs", config_file), "r") as f:
     config = yaml.safe_load(f)
 new_config = dict2namespace(config)
 
-def get_beta_schedule(beta_schedule, *, beta_start, beta_end, num_diffusion_timesteps):
-    def sigmoid(x):
-        return 1 / (np.exp(-x) + 1)
 
-    if beta_schedule == "quad":
-        betas = (
-            np.linspace(
-                beta_start ** 0.5,
-                beta_end ** 0.5,
-                num_diffusion_timesteps,
-                dtype=np.float64,
-            )
-            ** 2
-        )
-    elif beta_schedule == "linear":
-        betas = np.linspace(
-            beta_start, beta_end, num_diffusion_timesteps, dtype=np.float64
-        )
-    elif beta_schedule == "const":
-        betas = beta_end * np.ones(num_diffusion_timesteps, dtype=np.float64)
-    elif beta_schedule == "jsd":  # 1/T, 1/(T-1), 1/(T-2), ..., 1
-        betas = 1.0 / np.linspace(
-            num_diffusion_timesteps, 1, num_diffusion_timesteps, dtype=np.float64
-        )
-    elif beta_schedule == "sigmoid":
-        betas = np.linspace(-6, 6, num_diffusion_timesteps)
-        betas = sigmoid(betas) * (beta_end - beta_start) + beta_start
-    else:
-        raise NotImplementedError(beta_schedule)
-    assert betas.shape == (num_diffusion_timesteps,)
-    return betas
 
 class Coach:
      
@@ -357,7 +319,18 @@ class Coach:
             self.D.train()
         
         while self.global_step <= self.opts.max_steps:
-            for batch_idx, batch in enumerate(self.train_dataloader):                    
+            for batch_idx, batch in enumerate(self.train_dataloader):   
+                # Diffusion include source image and target image
+                # 1. Order Source image and target images
+                # 2. Use renactment on source image
+                # 3. Replace features of target image with source image according to segmentation map
+                # 4. Use diffusion to generate Swapped Image
+
+                # 
+
+
+
+
                 img, mask, mask_vis = batch
                 # breakpoint()
                 img = img.to(self.device).float()
@@ -379,13 +352,17 @@ class Coach:
                     # img = data_transform(self.config, img)
                     e = torch.randn_like(x)
                     b = self.betas
-
+                    n=n//2
                     # antithetic sampling
                     t = torch.randint(
                         low=0, high=self.num_timesteps, size=(n // 2 + 1,)
                     ).to(self.device)
+                    
                     t = torch.cat([t, self.num_timesteps - t - 1], dim=0)[:n]
+                    
                     a = (1-b).cumprod(dim=0).index_select(0, t).view(-1, 1, 1, 1)
+                    a=torch.concat((a,a),dim=0)
+                    # breakpoint()
                     x = x * a.sqrt() + e * (1.0 - a).sqrt()
                     recon1,latent=self.model.forward_swap(x, t.float())
                     # print("recon1 shape: ", recon1.shape)
@@ -466,15 +443,19 @@ class Coach:
                 # img = data_transform(self.config, img)
                 e = torch.randn_like(x)
                 b = self.betas
-
+                n=n//2
                 # antithetic sampling
                 t = torch.randint(
                     low=0, high=self.num_timesteps, size=(n // 2 + 1,)
                 ).to(self.device)
+                
                 t = torch.cat([t, self.num_timesteps - t - 1], dim=0)[:n]
+                
                 a = (1-b).cumprod(dim=0).index_select(0, t).view(-1, 1, 1, 1)
+                a=torch.concat((a,a),dim=0)
+                # breakpoint()
                 x = x * a.sqrt() + e * (1.0 - a).sqrt()
-                recon1,latent=self.model(x, t.float())
+                recon1,latent=self.model.forward_swap(x, t.float())
                 # print("recon1 shape: ", recon1.shape)
                 # if keepdim:
                 #     return (e - output).square().sum(dim=(1, 2, 3))
@@ -556,31 +537,42 @@ class Coach:
         loss_dict = {}
         loss = 0.0
         id_logs = None
+        B=img.shape[0]
+        no_src_imgs=B//2
+        # For swapping
+        source_img = img[:no_src_imgs]
+        target_img = img[no_src_imgs:]
+        source_mask = mask[:no_src_imgs]
+        target_mask = mask[no_src_imgs:]
+        ###########
         
         if self.opts.face_parsing_lambda > 0:
-            loss_face_parsing_1, face_parsing_sim_improvement_1 = self.face_parsing_loss(recon1, img)
+            loss_face_parsing_1, face_parsing_sim_improvement_1 = self.face_parsing_loss(recon1, target_img)
             
             loss_dict['loss_face_parsing'] = float(loss_face_parsing_1)
             loss_dict['face_parsing_improve'] = float(face_parsing_sim_improvement_1)
             loss += loss_face_parsing_1 * self.opts.face_parsing_lambda
             
         if self.opts.id_lambda > 0:
-            loss_id_1, sim_improvement_1, id_logs_1 = self.id_loss(recon1, img)
+            loss_id_1, sim_improvement_1, id_logs_1 = self.id_loss(recon1, source_img)
                    
             loss_dict['loss_id'] = float(loss_id_1)
             loss_dict['id_improve'] = float(sim_improvement_1)
             loss += loss_id_1 * self.opts.id_lambda
         if self.opts.l2_lambda > 0:
-            loss_l2_1 = F.mse_loss(recon1, img)
+            # loss_l2_1 = F.mse_loss(recon1, img)       @check this @sanoojan
             
-            loss_dict['loss_l2'] = float(loss_l2_1)
-            loss += loss_l2_1 * self.opts.l2_lambda
+            # loss_dict['loss_l2'] = float(loss_l2_1)
+            # loss += loss_l2_1 * self.opts.l2_lambda
+            loss_dict['loss_l2'] = 0.0
+            loss += 0.0
+
         if self.opts.lpips_lambda > 0:
             loss_lpips = 0
             for i in range(3):
                 loss_lpips_1 = self.lpips_loss(
                     F.adaptive_avg_pool2d(recon1,(1024//2**i,1024//2**i)), 
-                    F.adaptive_avg_pool2d(img,(1024//2**i,1024//2**i))
+                    F.adaptive_avg_pool2d(target_img,(1024//2**i,1024//2**i))
                 )
                
                 loss_lpips += loss_lpips_1
@@ -601,7 +593,7 @@ class Coach:
 
 
         if self.opts.style_lambda > 0:  # gram matrix loss
-            loss_style_1 = self.style_loss(recon1, img, mask_x = (mask==3).float(), mask_x_hat = (mask==3).float())
+            loss_style_1 = self.style_loss(recon1, target_img, mask_x = (target_mask==3).float(), mask_x_hat = (target_mask==3).float())
             
             loss_dict['loss_style'] = float(loss_style_1)
             loss += loss_style_1 * self.opts.style_lambda
@@ -620,13 +612,21 @@ class Coach:
             print(f'\t{key} = ', value)
 
     def parse_images(self, mask, img, recon1, display_count=2):
+        B=img.shape[0]
+        no_src_imgs=B//2
+        source_img = img[:no_src_imgs]
+        target_img = img[no_src_imgs:]
+        source_mask = mask[:no_src_imgs]
+        target_mask = mask[no_src_imgs:]
         im_data = []
-        # breakpoint()
-        display_count=min(display_count,len(img))
+
+        display_count=min(display_count,len(source_img))
         for i in range(display_count):
             cur_im_data = {
-                'input_face': torch_utils.tensor2im(img[i]),
-                'input_mask': torch_utils.tensor2map(mask[i]),
+                'Source_face': torch_utils.tensor2im(source_img[i]),
+                'Target_face': torch_utils.tensor2im(target_img[i]),
+                'Source_mask': torch_utils.tensor2map(source_mask[i]),
+                'Target_mask': torch_utils.tensor2map(target_mask[i]),
                 'recon_styleCode': torch_utils.tensor2im(recon1[i]),
             }
             im_data.append(cur_im_data)
@@ -706,15 +706,19 @@ class Coach:
                 # img = data_transform(self.config, img)
                 e = torch.randn_like(x)
                 b = self.betas
-
+                n=n//2
                 # antithetic sampling
                 t = torch.randint(
                     low=0, high=self.num_timesteps, size=(n // 2 + 1,)
                 ).to(self.device)
+                
                 t = torch.cat([t, self.num_timesteps - t - 1], dim=0)[:n]
+                
                 a = (1-b).cumprod(dim=0).index_select(0, t).view(-1, 1, 1, 1)
+                a=torch.concat((a,a),dim=0)
+                # breakpoint()
                 x = x * a.sqrt() + e * (1.0 - a).sqrt()
-                recon1,latent=self.model(x, t.float())
+                recon1,latent=self.model.forward_swap(x, t.float())
                 # print("recon1 shape: ", recon1.shape)
                 # if keepdim:
                 #     return (e - output).square().sum(dim=(1, 2, 3))
@@ -741,7 +745,7 @@ class Coach:
                 loss_dict["loss"] = float(overall_loss)
                 
             agg_loss_dict.append(loss_dict)
-
+            
             if show_images:
                 imgs = self.parse_images(onehot, img, recon1)
                 self.log_images('images/test/faces', imgs1_data=imgs, subscript='{:04d}'.format(batch_idx))

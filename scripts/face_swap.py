@@ -14,6 +14,7 @@ from skimage.transform import resize
 import sys
 sys.path.append(".")
 
+
 from src.pretrained.face_vid2vid.driven_demo import init_facevid2vid_pretrained_model, drive_source_demo
 from src.pretrained.gpen.gpen_demo import init_gpen_pretrained_model, GPEN_demo
 from src.pretrained.face_parsing.face_parsing_demo import init_faceParsing_pretrained_model, faceParsing_demo, vis_parsing_maps
@@ -36,8 +37,11 @@ from ddim.models.diffusion import Model
 from ddim.models.ema import EMAHelper
 from ddim.datasets import get_dataset, data_transform, inverse_data_transform
 from ddim.functions.losses import loss_registry
+import tqdm
+import glob
 import argparse
 
+import torchvision.utils as tvu
 
 config_file='celeba.yml'
 
@@ -55,6 +59,172 @@ def dict2namespace(config):
 with open(os.path.join("ddim/configs", config_file), "r") as f:
     config = yaml.safe_load(f)
 new_config = dict2namespace(config)
+
+def get_beta_schedule(beta_schedule, *, beta_start, beta_end, num_diffusion_timesteps):
+    def sigmoid(x):
+        return 1 / (np.exp(-x) + 1)
+
+    if beta_schedule == "quad":
+        betas = (
+            np.linspace(
+                beta_start ** 0.5,
+                beta_end ** 0.5,
+                num_diffusion_timesteps,
+                dtype=np.float64,
+            )
+            ** 2
+        )
+    elif beta_schedule == "linear":
+        betas = np.linspace(
+            beta_start, beta_end, num_diffusion_timesteps, dtype=np.float64
+        )
+    elif beta_schedule == "const":
+        betas = beta_end * np.ones(num_diffusion_timesteps, dtype=np.float64)
+    elif beta_schedule == "jsd":  # 1/T, 1/(T-1), 1/(T-2), ..., 1
+        betas = 1.0 / np.linspace(
+            num_diffusion_timesteps, 1, num_diffusion_timesteps, dtype=np.float64
+        )
+    elif beta_schedule == "sigmoid":
+        betas = np.linspace(-6, 6, num_diffusion_timesteps)
+        betas = sigmoid(betas) * (beta_end - beta_start) + beta_start
+    else:
+        raise NotImplementedError(beta_schedule)
+    assert betas.shape == (num_diffusion_timesteps,)
+    return betas
+
+def sample_image( x, model, last=True):
+        skip=1
+        
+        try:
+            skip = skip
+        except Exception:
+            skip = 1
+        sample_type="generalized"
+        skip_type="uniform"
+        device='cuda'
+        eta=1.0
+
+        betas = get_beta_schedule(
+            beta_schedule=new_config.diffusion.beta_schedule,
+            beta_start=new_config.diffusion.beta_start,
+            beta_end=new_config.diffusion.beta_end,
+            num_diffusion_timesteps=new_config.diffusion.num_diffusion_timesteps,
+        )
+        betas  = torch.from_numpy(betas).float().to(device)
+        num_timesteps=betas.shape[0]
+        print(num_timesteps)
+        timesteps=1000
+        if sample_type == "generalized":
+            if skip_type == "uniform":
+                skip = num_timesteps // timesteps
+                seq = range(0, num_timesteps, skip)
+            elif skip_type == "quad":
+                seq = (
+                    np.linspace(
+                        0, np.sqrt(num_timesteps * 0.8), timesteps
+                    )
+                    ** 2
+                )
+                seq = [int(s) for s in list(seq)]
+            else:
+                raise NotImplementedError
+            from ddim.functions.denoising import generalized_steps
+
+            xs = generalized_steps(x, seq, model, betas, eta=eta)
+            x = xs
+        elif sample_type == "ddpm_noisy":
+            if skip_type == "uniform":
+                skip = num_timesteps // timesteps
+                seq = range(0, num_timesteps, skip)
+            elif skip_type == "quad":
+                seq = (
+                    np.linspace(
+                        0, np.sqrt(num_timesteps * 0.8), timesteps
+                    )
+                    ** 2
+                )
+                seq = [int(s) for s in list(seq)]
+            else:
+                raise NotImplementedError
+            from ddim.functions.denoising import ddpm_steps
+
+            x = ddpm_steps(x, seq, model, betas)
+        else:
+            raise NotImplementedError
+        if last:
+            x = x[0][-1]
+        return x
+
+def sample_fid( model,config,device='cuda',save_path=None):
+    config =config
+    # img_id = len(glob.glob(f"{image_folder}/*"))
+    img_id=0
+    print(f"starting from image {img_id}")
+    total_n_samples = 32
+    n_rounds = (total_n_samples - img_id) // config.sampling.batch_size
+
+    with torch.no_grad():
+        for _ in tqdm.tqdm(
+            range(n_rounds), desc="Generating image samples for FID evaluation."
+        ):
+            n = config.sampling.batch_size
+            x = torch.randn(
+                n,
+                config.data.channels,
+                config.data.image_size,
+                config.data.image_size,
+                device=device,
+            )
+
+            x = sample_image(x, model)
+            x = inverse_data_transform(config, x)
+            # resize x to 256x256
+            x = F.interpolate(x, size=256, mode="bilinear")
+            for i in range(n):
+                tvu.save_image(
+                    x[i], os.path.join(save_path, f"{img_id}.png")
+                )
+                img_id += 1
+
+def sample_interpolation(model,config,device='cuda',save_path=None):
+        config = new_config
+
+        def slerp(z1, z2, alpha):
+            theta = torch.acos(torch.sum(z1 * z2) / (torch.norm(z1) * torch.norm(z2)))
+            return (
+                torch.sin((1 - alpha) * theta) / torch.sin(theta) * z1
+                + torch.sin(alpha * theta) / torch.sin(theta) * z2
+            )
+
+        z1 = torch.randn(
+            1,
+            config.data.channels,
+            config.data.image_size,
+            config.data.image_size,
+            device=device,
+        )
+        z2 = torch.randn(
+            1,
+            config.data.channels,
+            config.data.image_size,
+            config.data.image_size,
+            device=device,
+        )
+        alpha = torch.arange(0.0, 1.01, 0.1).to(z1.device)
+        z_ = []
+        for i in range(alpha.size(0)):
+            z_.append(slerp(z1, z2, alpha[i]))
+
+        x = torch.cat(z_, dim=0)
+        xs = []
+
+        # Hard coded here, modify to your preferences
+        with torch.no_grad():
+            for i in range(0, x.size(0), 8):
+                xs.append(sample_image(x[i : i + 8], model))
+        x = inverse_data_transform(config, torch.cat(xs, dim=0))
+        for i in range(x.size(0)):
+            tvu.save_image(x[i], os.path.join(save_path, f"{i}.png"))
 
 
 
@@ -360,6 +530,62 @@ def faceSwapping_pipeline(source, target, opts, save_dir, target_mask=None, need
     else:
         pasted_image = swapped_and_pasted
 
+    #Diffusion inference check
+
+
+    # if not self.args.use_pretrained:
+    #     if getattr(self.config.sampling, "ckpt_id", None) is None:
+    #         states = torch.load(
+    #             os.path.join(self.args.log_path, "ckpt.pth"),
+    #             map_location=self.config.device,
+    #         )
+    #     else:
+    #         states = torch.load(
+    #             os.path.join(
+    #                 self.args.log_path, f"ckpt_{self.config.sampling.ckpt_id}.pth"
+    #             ),
+    #             map_location=self.config.device,
+    #         )
+    #     model = model.to(self.device)
+    #     model = torch.nn.DataParallel(model)
+    #     model.load_state_dict(states[0], strict=True)
+
+    #     if self.config.model.ema:
+    #         ema_helper = EMAHelper(mu=self.config.model.ema_rate)
+    #         ema_helper.register(model)
+    #         ema_helper.load_state_dict(states[-1])
+    #         ema_helper.ema(model)
+    #     else:
+    #         ema_helper = None
+    # else:
+    #     # This used the pretrained DDPM model, see https://github.com/pesser/pytorch_diffusion
+    #     if self.config.data.dataset == "CIFAR10":
+    #         name = "cifar10"
+    #     elif self.config.data.dataset == "LSUN":
+    #         name = f"lsun_{self.config.data.category}"
+    #     else:
+    #         raise ValueError
+    #     ckpt = get_ckpt_path(f"ema_{name}")
+    #     print("Loading checkpoint {}".format(ckpt))
+    #     model.load_state_dict(torch.load(ckpt, map_location=self.device))
+    #     model.to(self.device)
+    #     model = torch.nn.DataParallel(model)
+
+    model.eval()
+    # sample_interpolation(model,new_config,device='cuda',save_path=save_dir)
+    sample_fid(model,new_config,device='cuda',save_path=save_dir)
+    # if self.args.fid:
+    #     self.sample_fid(model)
+    # elif self.args.interpolation:
+    #     self.sample_interpolation(model)
+    # elif self.args.sequence:
+    #     self.sample_sequence(model)
+    # else:
+    #     raise NotImplementedError("Sample procedeure not defined")
+
+
+
+
     pasted_image.save(os.path.join(save_dir, result_name))
 
     
@@ -403,13 +629,20 @@ if __name__ == "__main__":
     # E4S model
     net = Net3(opts)
     net = net.to(opts.device)
-    # model = Model(new_config)     # Diffusion
-    # model= model.to(opts.device)
+    model = Model(new_config)     # Diffusion
+    model= model.to(opts.device)
     save_dict = torch.load(opts.checkpoint_path)
-    # save_dict_net=torch.load('/home/sb1/sanoojan/e4s/pretrained_ckpts/e4s/iteration_300000.pt')
-    net.load_state_dict(torch_utils.remove_module_prefix(save_dict["state_dict"], prefix="module."))
+    save_dict_net=torch.load('/home/sb1/sanoojan/e4s/pretrained_ckpts/e4s/iteration_300000.pt')
+    net.load_state_dict(torch_utils.remove_module_prefix(save_dict_net["state_dict"], prefix="module."))
+    # net_ema = EMAHelper(mu=new_config.model.ema_rate)
+    # net_ema.register(model)
+    # net_ema.load_state_dict(torch_utils.remove_module_prefix(save_dict_net["state_dict_ema"], prefix="module."))
+    # net_ema.ema(model)
+    
+ 
+    
     # model.load_state_dict(torch_utils.remove_module_prefix(save_dict["state_dict"], prefix="module."))
-
+    net.latent_avg = save_dict_net['latent_avg'].to(opts.device)
     # model.latent_avg = save_dict['latent_avg'].to(opts.device)
     print("Load E4S pre-trained model success!") 
     # ========================================================  

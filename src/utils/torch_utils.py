@@ -108,8 +108,9 @@ def get_colors():
 
 def vis_faces(log_hooks1):
     display_count = len(log_hooks1)
-    fig = plt.figure(figsize=(6*2, 4 * display_count))
-    gs = fig.add_gridspec(display_count, 3)
+    fig_count=len(log_hooks1[0])
+    fig = plt.figure(figsize=(fig_count*2*2, 4 * display_count))
+    gs = fig.add_gridspec(display_count, fig_count)
     for i in range(display_count):
         hooks_dict1 = log_hooks1[i]
 
@@ -121,16 +122,42 @@ def vis_faces(log_hooks1):
 
 
 def vis_faces_no_id(hooks_dict1, fig, gs, i):
-    plt.imshow(hooks_dict1['input_face'])
-    plt.title('input_face1')
+    # plt.imshow(hooks_dict1['input_face'])
+    # plt.title('input_face1')
+
+    # fig.add_subplot(gs[i, 1])
+    # plt.imshow(hooks_dict1['input_mask'])
+    # plt.title('input_mask1')
+
+    # fig.add_subplot(gs[i, 2])
+    # plt.imshow(hooks_dict1['recon_styleCode'])
+    # plt.title('recon_styleCode1')
+    #    'Source_face': torch_utils.tensor2im(source_img[i]),
+    #     'Target_face': torch_utils.tensor2im(target_img[i]),
+    #     'Source_mask': torch_utils.tensor2map(source_mask[i]),
+    #     'Target_mask': torch_utils.tensor2map(target_mask[i]),
+    #     'recon_styleCode': torch_utils.tensor2im(recon1[i]),
+    plt.imshow(hooks_dict1['Source_face'])
+    plt.title('Source_face')
 
     fig.add_subplot(gs[i, 1])
-    plt.imshow(hooks_dict1['input_mask'])
-    plt.title('input_mask1')
+    plt.imshow(hooks_dict1['Target_face'])
+    plt.title('Target_face')
 
     fig.add_subplot(gs[i, 2])
+    plt.imshow(hooks_dict1['Source_mask'])
+    plt.title('Source_mask')
+
+    fig.add_subplot(gs[i, 3])
+    plt.imshow(hooks_dict1['Target_mask'])
+    plt.title('Target_mask')
+
+    fig.add_subplot(gs[i, 4])
     plt.imshow(hooks_dict1['recon_styleCode'])
-    plt.title('recon_styleCode1')
+    plt.title('recon_styleCode')
+
+
+
     
     # fig.add_subplot(gs[i, 3])
     # plt.imshow(hooks_dict1['recon_styleCode_feats'])

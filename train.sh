@@ -10,7 +10,15 @@
 
 
 # python src/utils/create_mask.py
+# python scripts/train.py \
+#         --exp_dir='running_exp_celeba_diffusion_combined_img_change' \
+#         --dataset_name='celeba' \
+#         --out_size=1024 
+
+
 python scripts/train.py \
-        --exp_dir='running_exp_celeba_diffusion_combined' \
+        --exp_dir='running_exp_celeba_diffusion_combined_no_face_parsing' \
         --dataset_name='celeba' \
+        --id_lambda=0.9 \
+        --face_parsing_lambda=0.0 \
         --out_size=1024 
