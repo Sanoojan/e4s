@@ -404,9 +404,10 @@ def faceSwapping_pipeline(source, target, opts, save_dir, target_mask=None, need
     predictions = drive_source_demo(S_256, [T_256], generator, kp_detector, he_estimator, estimate_jacobian)
     predictions = [(pred*255).astype(np.uint8) for pred in predictions]
     # del generator, kp_detector, he_estimator
-    
+    breakpoint()
     # (2) GPEN input & output [0,255] range with BGR
     drivens = [GPEN_demo(pred[:,:,::-1], GPEN_model, aligned=False) for pred in predictions]
+    # breakpoint()
     D = Image.fromarray(drivens[0][:,:,::-1]) # to PIL.Image
     if verbose:
         D.save(os.path.join(save_dir,"D_%s_to_%s.png"%(source_and_target_files[0][0], source_and_target_files[1][0])))

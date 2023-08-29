@@ -16,8 +16,23 @@
 #         --out_size=1024 
 
 
+# python scripts/train.py \
+#         --exp_dir='running_exp_celeba_diffusion_combined_no_face_parsing' \
+#         --dataset_name='celeba' \
+#         --id_lambda=0.9 \
+#         --face_parsing_lambda=0.0 \
+#         --out_size=1024 
+
+# python scripts/train.py \
+#         --exp_dir='Experiments/celeba/diffusion/combined_no_face_parsing_reenactment' \
+#         --dataset_name='celeba' \
+#         --id_lambda=0.9 \
+#         --face_parsing_lambda=0.0 \
+#         --out_size=1024 
+
+
 python scripts/train.py \
-        --exp_dir='running_exp_celeba_diffusion_combined_no_face_parsing' \
+        --exp_dir='Experiments/celeba/diffusion/DDIM_denoising_added' \
         --dataset_name='celeba' \
         --id_lambda=0.9 \
         --face_parsing_lambda=0.0 \

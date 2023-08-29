@@ -23,10 +23,17 @@ class RealESRNet(object):
         self.srmodel.eval()
         self.srmodel = self.srmodel.to(self.device)
 
-    def process(self, img):
-        img = img.astype(np.float32) / 255.
-        img = torch.from_numpy(np.transpose(img[:, :, [2, 1, 0]], (2, 0, 1))).float()
-        img = img.unsqueeze(0).to(self.device)
+    def process(self, img,batched=False):
+    
+        if type(img)==torch.Tensor:
+            img=img.unsqueeze(0).to(self.device)
+        
+        
+        elif not batched:
+            img = img.astype(np.float32) / 255.
+            img = torch.from_numpy(np.transpose(img[:, :, [2, 1, 0]], (2, 0, 1))).float()
+            img = img.unsqueeze(0).to(self.device)
+        
 
         if self.scale == 2:
             mod_scale = 2
@@ -50,9 +57,16 @@ class RealESRNet(object):
             if mod_scale is not None:
                 _, _, h, w = output.size()
                 output = output[:, :, 0:h - h_pad, 0:w - w_pad]
-            output = output.data.squeeze().float().cpu().clamp_(0, 1).numpy()
-            output = np.transpose(output[[2, 1, 0], :, :], (1, 2, 0))
-            output = (output * 255.0).round().astype(np.uint8)
+            
+            # breakpoint()
+            if not batched:
+                output = output.data.squeeze().float().cpu().clamp_(0, 1).numpy()
+                output = np.transpose(output[[2, 1, 0], :, :], (1, 2, 0))
+                output = (output * 255.0).round().astype(np.uint8)
+            else:
+                output = output.data.float().cpu().clamp_(0, 1).numpy()
+                output = np.transpose(output[:,[2, 1, 0], :, :], (0, 2, 3, 1))
+                output = (output * 255.0).round().astype(np.uint8)
 
             return output
         except Exception as e:

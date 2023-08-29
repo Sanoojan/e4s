@@ -55,6 +55,7 @@ class TrainOptions:
 		self.parser.add_argument('--style_lambda', default=0, type=float, help='style loss multiplier factor')
 		self.parser.add_argument('--style_code_lambda', default=2e4, type=float, help='style code loss multiplier factor')
 		self.parser.add_argument('--structure_code_lambda', default=0, type=float, help='structure code loss multiplier factor')
+		self.parser.add_argument('--Diffusion_lambda', default=0.1, type=float, help='Diffusion loss multiplier factor')
     
 		self.parser.add_argument('--style_loss_norm', default=1, type=int, help='whether to normalize the [-1, 1] image to ImageNet in style loss')
   

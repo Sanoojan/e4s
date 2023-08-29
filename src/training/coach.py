@@ -26,6 +26,12 @@ from src.models.networks import Net3
 from src.models.stylegan2.model import Generator,Discriminator
 from src.utils import torch_utils
 
+
+
+#Reenactment
+from src.pretrained.face_vid2vid.driven_demo import init_facevid2vid_pretrained_model, drive_source_demo
+from src.pretrained.gpen.gpen_demo import init_gpen_pretrained_model, GPEN_demo
+
 import sys
 sys.path.append('/home/sb1/sanoojan/e4s/ddim')
 import yaml
@@ -46,6 +52,9 @@ config_file='celeba.yml'
 with open(os.path.join("ddim/configs", config_file), "r") as f:
     config = yaml.safe_load(f)
 new_config = dict2namespace(config)
+
+normalize=transforms.Compose([NORMALIZE])
+
 
 
 
@@ -97,7 +106,31 @@ class Coach:
         
         #Diffusion end
         
-     
+        #Reenactment
+        face_vid2vid_cfg = "./pretrained_ckpts/facevid2vid/vox-256.yaml"
+        face_vid2vid_ckpt = "./pretrained_ckpts/facevid2vid/00000189-checkpoint.pth.tar"
+        self.generator, self.kp_detector, self.he_estimator, self.estimate_jacobian = init_facevid2vid_pretrained_model(face_vid2vid_cfg, face_vid2vid_ckpt)
+
+        
+        
+
+        self.generator = self.generator.to(self.device).eval()
+        self.kp_detector = self.kp_detector.to(self.device).eval()
+        self.he_estimator = self.he_estimator.to(self.device).eval()
+
+        gpen_model_params = {
+        "base_dir": "./pretrained_ckpts/gpen/",  # a sub-folder named <weights> should exist
+        "in_size": 512,
+        "model": "GPEN-BFR-512", 
+        "use_sr": True,
+        "sr_model": "realesrnet",
+        "sr_scale": 4,
+        "channel_multiplier": 2,
+        "narrow": 1,
+    }
+        with torch.set_grad_enabled(False):
+            self.GPEN_model = init_gpen_pretrained_model(model_params = gpen_model_params)
+        
         # print(self.device)
       
 
@@ -286,7 +319,7 @@ class Coach:
         if self.opts.dataset_name=="ffhq":    
             train_ds = FFHQDataset(dataset_root=self.opts.ffhq_dataset_root,
                                     img_transform=transforms.Compose(
-                                        [TO_TENSOR, NORMALIZE]),
+                                        [TO_TENSOR]),  # Removed Normalize and aded after reenactment @sanoojan
                                     label_transform=transforms.Compose(
                                         [FFHQ_MASK_CONVERT_TF_DETAILED, TO_TENSOR]),  # FFHQ_MASK_CONVERT_TF
                                     fraction=self.opts.ds_frac,
@@ -295,7 +328,7 @@ class Coach:
             # breakpoint()
             train_ds = CelebAHQDataset(dataset_root=self.opts.celeba_dataset_root, mode="train",
                                     img_transform=transforms.Compose(
-                                        [TO_TENSOR, NORMALIZE]),
+                                        [TO_TENSOR]),     # Removed Normalize and aded after reenactment @sanoojan
                                     label_transform=transforms.Compose(
                                         [MASK_CONVERT_TF_DETAILED, TO_TENSOR]),  # MASK_CONVERT_TF_DETAILED
                                     fraction=self.opts.ds_frac,
@@ -303,7 +336,7 @@ class Coach:
         
         test_ds = CelebAHQDataset(dataset_root=self.opts.celeba_dataset_root, mode="test",
                                   img_transform=transforms.Compose(
-                                      [TO_TENSOR, NORMALIZE]),
+                                      [TO_TENSOR]),  #[TO_TENSOR, NORMALIZE]), # Removed Normalize and aded after reenactment @sanoojan
                                   label_transform=transforms.Compose(
                                       [MASK_CONVERT_TF_DETAILED, TO_TENSOR]),  # MASK_CONVERT_TF
                                   fraction=self.opts.ds_frac)
@@ -317,6 +350,12 @@ class Coach:
         self.model.train()
         if self.opts.train_D:
             self.D.train()
+        # self.generator, self.kp_detector, self.he_estimator, self.estimate_jacobian
+        torch_utils.requires_grad(self.generator, False)
+        torch_utils.requires_grad(self.kp_detector, False)
+        torch_utils.requires_grad(self.he_estimator, False)
+        # torch_utils.requires_grad(self.estimate_jacobian, False)
+        # torch_utils.requires_grad(self.GPEN_model, False)
         
         while self.global_step <= self.opts.max_steps:
             for batch_idx, batch in enumerate(self.train_dataloader):   
@@ -338,6 +377,39 @@ class Coach:
                 # [bs,1,H,W] format mask to one-hot，i.e., [bs,#seg_cls,H,W]
                 onehot = torch_utils.labelMap2OneHot(mask, num_cls=self.opts.num_seg_cls)
                 # breakpoint()
+
+                #2. Reenactment
+                B= img.size(0)
+                src_img=F.interpolate(img[:B//2], size=(256, 256), mode='bilinear', align_corners=True)
+                tar_img=F.interpolate(img[B//2:], size=(256, 256), mode='bilinear', align_corners=True)
+        
+                #  faceVid2Vid  input & output [0,1] range with RGB
+                predictions = drive_source_demo(src_img, tar_img, self.generator, self.kp_detector, self.he_estimator, self.estimate_jacobian,for_train=True)
+                
+                # pred_img=torch.from_numpy(predictions[0]).permute(2, 0, 1).float() 
+                # save_image(pred_img, 'pred_img.png')
+                # breakpoint()
+    
+                predictions = (predictions*255).astype(np.uint8)
+                # change predictions as numpy array
+                # predictions = predictions.astype(np.uint8)
+
+                # del generator, kp_detector, he_estimator
+                # breakpoint()
+                # GPEN input & output [0,255] range with BGR
+                # drivens = [GPEN_demo(pred.flip(dims=[2]), self.GPEN_model, aligned=False,batched=False) for pred in predictions]
+                drivens = [GPEN_demo(pred[:,:,::-1], self.GPEN_model, aligned=False,batched=False) for pred in predictions]
+                driven_tensor=torch.from_numpy(np.array(drivens)[:,:,:,::-1]/255.0).permute(0, 3, 1, 2).float().cuda()
+                img=torch.cat((driven_tensor,img[B//2:]),dim=0)
+                #normalize img with transform
+                img=normalize(img)
+
+
+
+                # breakpoint()
+                # D = Image.fromarray(drivens[0][:,:,::-1]) # to PIL.Image
+
+
                 # ============ update D ===============
                 if self.opts.train_D and (self.global_step % self.opts.d_every == 0):
                     torch_utils.requires_grad(self.model, False)
@@ -350,7 +422,8 @@ class Coach:
                     x = F.interpolate(img, size=(256, 256), mode='bilinear', align_corners=True)
                 
                     # img = data_transform(self.config, img)
-                    e = torch.randn_like(x)
+                    B, C, H, W = x.size()
+                    e = torch.randn(B//2, C, H, W, device=self.device)
                     b = self.betas
                     n=n//2
                     # antithetic sampling
@@ -365,6 +438,8 @@ class Coach:
                     # breakpoint()
                     x = x * a.sqrt() + e * (1.0 - a).sqrt()
                     recon1,latent=self.model.forward_swap(x, t.float())
+
+                    
                     # print("recon1 shape: ", recon1.shape)
                     # if keepdim:
                     #     return (e - output).square().sum(dim=(1, 2, 3))

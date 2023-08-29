@@ -48,7 +48,7 @@ class FaceEnhancement(object):
         mask = cv2.GaussianBlur(mask, (101, 101), 11)
         return mask.astype(np.float32)
 
-    def process(self, img, aligned=False):
+    def process(self, img, aligned=False,batched=False):
         orig_faces, enhanced_faces = [], []
         if aligned:
             ef = self.facegan.process(img)
@@ -61,10 +61,14 @@ class FaceEnhancement(object):
             return ef, orig_faces, enhanced_faces
 
         if self.use_sr:
-            img_sr = self.srmodel.process(img)
+            img_sr = self.srmodel.process(img,batched=batched)
+            # breakpoint()
             if img_sr is not None:
-                img = cv2.resize(img, img_sr.shape[:2][::-1])
-
+                if not batched:
+                    img = cv2.resize(img, img_sr.shape[:2][::-1])
+                else:
+                    img = np.array([cv2.resize(i, img_sr.shape[1:3][::-1]) for i in img])
+        # breakpoint()
         facebs, landms = self.facedetector.detect(img)
         
         height, width = img.shape[:2]

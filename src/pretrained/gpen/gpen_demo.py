@@ -31,7 +31,7 @@ def init_gpen_pretrained_model(model_params):
     return model
 
 
-def GPEN_demo(img, model, aligned=False):
+def GPEN_demo(img, model, aligned=False,batched=False):
     """ 
     
     args:
@@ -44,7 +44,7 @@ def GPEN_demo(img, model, aligned=False):
     """
     with torch.no_grad():
         # img_out是整张图片的输入，orig_faces和enhanced_faces分别是增强前后的脸部区域
-        img_out, orig_faces, enhanced_faces = model.process(img, aligned=aligned)
+        img_out, orig_faces, enhanced_faces = model.process(img, aligned=aligned,batched=batched)
         
     return img_out    
             
