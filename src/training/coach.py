@@ -55,6 +55,71 @@ new_config = dict2namespace(config)
 
 normalize=transforms.Compose([NORMALIZE])
 
+def compute_alpha(beta, t):
+    beta = torch.cat([torch.zeros(1).to(beta.device), beta], dim=0)
+    a = (1 - beta).cumprod(dim=0).index_select(0, t + 1).view(-1, 1, 1, 1)
+    return a
+
+def ddpm_steps(x, seq, model, b, last=True,**kwargs):
+    with torch.no_grad():
+        n = x.size(0)
+        seq_next = [-1] + list(seq[:-1])
+        xs = [x]
+        x0_preds = []
+        betas = b
+        for i, j in zip(reversed(seq), reversed(seq_next)):
+            t = (torch.ones(n) * i).to(x.device)
+            next_t = (torch.ones(n) * j).to(x.device)
+            at = compute_alpha(betas, t.long())
+            atm1 = compute_alpha(betas, next_t.long())
+            beta_t = 1 - at / atm1
+            x = xs[-1].to('cuda')
+
+            output = model(x, t.float())
+            e = output
+
+            x0_from_e = (1.0 / at).sqrt() * x - (1.0 / at - 1).sqrt() * e
+            x0_from_e = torch.clamp(x0_from_e, -1, 1)
+            x0_preds.append(x0_from_e.to('cpu'))
+            mean_eps = (
+                (atm1.sqrt() * beta_t) * x0_from_e + ((1 - beta_t).sqrt() * (1 - atm1)) * x
+            ) / (1.0 - at)
+
+            mean = mean_eps
+            noise = torch.randn_like(x)
+            mask = 1 - (t == 0).float()
+            mask = mask.view(-1, 1, 1, 1)
+            logvar = beta_t.log()
+            sample = mean + mask * torch.exp(0.5 * logvar) * noise
+            xs.append(sample.to('cpu'))
+    return xs, x0_preds
+
+def generalized_steps(x, seq, model, b,last=True, **kwargs):
+    with torch.no_grad():
+        n = x.size(0)
+        seq_next = [-1] + list(seq[:-1])
+        x0_preds = []
+        xs = [x]
+        for i, j in zip(reversed(seq), reversed(seq_next)):
+            t = (torch.ones(n) * i).to(x.device)
+            next_t = (torch.ones(n) * j).to(x.device)
+            at = compute_alpha(b, t.long())
+            at_next = compute_alpha(b, next_t.long())
+            xt = xs[-1].to('cuda')
+            et = model(xt, t)
+            if len(et)==2:
+                et = et[0]
+            breakpoint()
+            x0_t = (xt - et * (1 - at).sqrt()) / at.sqrt()
+            x0_preds.append(x0_t.to('cpu'))
+            c1 = (
+                kwargs.get("eta", 0) * ((1 - at / at_next) * (1 - at_next) / (1 - at)).sqrt()
+            )
+            c2 = ((1 - at_next) - c1 ** 2).sqrt()
+            xt_next = at_next.sqrt() * x0_t + c1 * torch.randn_like(x) + c2 * et
+            xs.append(xt_next.to('cpu'))
+
+    return xs, x0_preds
 
 
 
@@ -300,7 +365,54 @@ class Coach:
         
         module.load_state_dict(new_state_dict, strict=False)
         
-                
+
+    def sample_image(self, x, model,current_num_timesteps=1000, last=True,return_e=True,return_latent=True):
+        # x: [N, C, H, W] self.betas:[1000] self.args.eta=0
+        try:
+            skip = self.opts.skip
+        except Exception:
+            skip = 1
+
+        if self.opts.sample_type == "generalized":
+            if self.opts.skip_type == "uniform":
+                skip = current_num_timesteps // self.opts.timesteps
+                seq = range(0, current_num_timesteps skip)   # 0,..,1000
+            elif self.opts.skip_type == "quad":
+                seq = (
+                    np.linspace(
+                        0, np.sqrt(current_num_timesteps * 0.8), self.args.timesteps
+                    )
+                    ** 2
+                )
+                seq = [int(s) for s in list(seq)]
+            else:
+                raise NotImplementedError
+            # breakpoint()
+            xs = generalized_steps(x, seq, model, self.betas, eta=self.args.eta,last=last)
+            # breakpoint()
+            x = xs
+        elif self.opts.sample_type == "ddpm_noisy":
+            if self.opts.skip_type == "uniform":
+                skip = current_num_timesteps // self.opts.timesteps
+                seq = range(0, current_num_timesteps, skip)
+            elif self.opts.skip_type == "quad":
+                seq = (
+                    np.linspace(
+                        0, np.sqrt(current_num_timesteps* 0.8), self.args.timesteps
+                    )
+                    ** 2
+                )
+                seq = [int(s) for s in list(seq)]
+            else:
+                raise NotImplementedError
+            
+            x = ddpm_steps(x, seq, model, self.betas,last=last)
+        else:
+            raise NotImplementedError
+        # if last:
+        #     x = x[0][-1]
+        return x
+
     def configure_optimizers(self):
         self.params=list(filter(lambda p: p.requires_grad ,list(self.model.parameters())))
         self.params_D=list(filter(lambda p: p.requires_grad ,list(self.D.parameters()))) if self.opts.train_D else None
@@ -435,11 +547,19 @@ class Coach:
                     
                     a = (1-b).cumprod(dim=0).index_select(0, t).view(-1, 1, 1, 1)
                     a=torch.concat((a,a),dim=0)
+                    a_next=1
                     # breakpoint()
                     x = x * a.sqrt() + e * (1.0 - a).sqrt()
-                    recon1,latent=self.model.forward_swap(x, t.float())
-
+                    et,latent=self.model.forward_swap(x, t.float())
+                    recon1 = (x - et * (1 - a).sqrt()) / a.sqrt()
+                    # c1 = (
+                    #     kwargs.get("eta", 0) * ((1 - at / at_next) * (1 - at_next) / (1 - at)).sqrt()
+                    # )
+                    # c1=0
+                    # c2 = ((1 - a_next) - c1 ** 2).sqrt()
                     
+                    # xt_next = a_next.sqrt() * x0_t + c1 * torch.randn_like(x) + c2 * et
+
                     # print("recon1 shape: ", recon1.shape)
                     # if keepdim:
                     #     return (e - output).square().sum(dim=(1, 2, 3))
@@ -450,6 +570,8 @@ class Coach:
 
                     #resize img to 1024
                     recon1 = F.interpolate(recon1, size=(1024, 1024), mode='bilinear', align_corners=True)
+
+
 
                     # print("recon1 shape: ", recon1.shape)
                     # print("latent shape: ", latent.shape)

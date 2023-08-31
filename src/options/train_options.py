@@ -59,6 +59,14 @@ class TrainOptions:
     
 		self.parser.add_argument('--style_loss_norm', default=1, type=int, help='whether to normalize the [-1, 1] image to ImageNet in style loss')
   
+		# ================== Diffusion ==================
+
+		self.parser.add_argument('--skip', default=50, type=int, help='DDPM skip steps')
+		self.parser.add_argument('--timesteps', default=50, type=int, help='DDPM steps')
+		self.parser.add_argument('--sample_type', default='generalized', type=str, help='Diffusion sample type')
+		self.parser.add_argument('--skip_type', default='uniform', type=str, help='Diffusion skip type')
+
+
         # ================== styleGAN2 ==================
 		self.parser.add_argument('--stylegan_weights', default='./pretrained_ckpts/stylegan2/stylegan2-ffhq-config-f.pt', type=str, help='Path to StyleGAN model weights')
 		self.parser.add_argument('--learn_in_w', action='store_true', help='Whether to learn in w space instead of w+')
