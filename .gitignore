@@ -26,3 +26,7 @@ running_exp_celeba_diffusion_combined/*
 running_exp_celeba_diffusion_combined_img_change/*
 running_exp_celeba_diffusion_combined_no_face_parsing/*
 Experiments/*
+.cache/*
+.vscode-server/*
+
+.config/*
