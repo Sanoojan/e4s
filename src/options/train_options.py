@@ -62,9 +62,10 @@ class TrainOptions:
 		# ================== Diffusion ==================
 
 		self.parser.add_argument('--skip', default=50, type=int, help='DDPM skip steps')
-		self.parser.add_argument('--timesteps', default=50, type=int, help='DDPM steps')
+		self.parser.add_argument('--timesteps', default=4, type=int, help='DDPM steps')
 		self.parser.add_argument('--sample_type', default='generalized', type=str, help='Diffusion sample type')
 		self.parser.add_argument('--skip_type', default='uniform', type=str, help='Diffusion skip type')
+		self.parser.add_argument('--eta', default=0.0, type=float, help='Diffuisoin eta')
 
 
         # ================== styleGAN2 ==================
@@ -75,8 +76,8 @@ class TrainOptions:
 		self.parser.add_argument('--n_styles', default=18, type=int, help='StyleGAN layers number')
 
         # auxiliary models
-		# self.parser.add_argument('--ir_se50_path', default='./pretrained_ckpts/auxiliray/model_ir_se50.pth', type=str, help='Path to ir_se50 model weights')
-		self.parser.add_argument('--ir_se50_path', default='pretrained_ckpts/blendface/blendface.pt', type=str, help='Path to ir_se50 model weights')
+		self.parser.add_argument('--ir_se50_path', default='./pretrained_ckpts/auxiliray/model_ir_se50.pth', type=str, help='Path to ir_se50 model weights')
+		# self.parser.add_argument('--ir_se50_path', default='pretrained_ckpts/blendface/blendface.pt', type=str, help='Path to ir_se50 model weights')
 		self.parser.add_argument('--face_parsing_model_path', default='./pretrained_ckpts/auxiliray/model.pth', type=str, help='Path to face parsing model weights')
 		self.parser.add_argument('--checkpoint_path', default=None, type=str, help='Path to model checkpoint')
 		

@@ -31,7 +31,7 @@
 #         --out_size=1024 
 
 
-python scripts/train.py \
+CUDA_VISIBLE_DEVICES=0 python scripts/train.py \
         --exp_dir='Experiments/celeba/diffusion/DDIM_denoising_added' \
         --dataset_name='celeba' \
         --id_lambda=0.9 \

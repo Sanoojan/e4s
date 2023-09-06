@@ -11,8 +11,8 @@ class IDLoss(nn.Module):
         self.opts = opts 
         
         self.face_pool_1 = torch.nn.AdaptiveAvgPool2d((256, 256))
-        # self.facenet = Backbone(input_size=112, num_layers=50, drop_ratio=0.6, mode='ir_se')
-        self.facenet=iresnet100(pretrained=False, fp16=False) # changed by sanoojan
+        self.facenet = Backbone(input_size=112, num_layers=50, drop_ratio=0.6, mode='ir_se')
+        # self.facenet=iresnet100(pretrained=False, fp16=False) # changed by sanoojan
         
         self.facenet.load_state_dict(torch.load(opts.ir_se50_path))
         self.face_pool_2 = torch.nn.AdaptiveAvgPool2d((112, 112))

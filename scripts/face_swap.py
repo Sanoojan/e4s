@@ -30,7 +30,7 @@ from src.models.networks import Net3
 from src.datasets.dataset import TO_TENSOR, NORMALIZE, __celebAHQ_masks_to_faceParser_mask_detailed
 
 import sys
-sys.path.append('/home/sb1/sanoojan/e4s/ddim')
+sys.path.append('/share/users/sanoojan/e4s/ddim')
 import yaml
 from ddim.runners.diffusion import Diffusion
 from ddim.models.diffusion import Model

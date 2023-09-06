@@ -33,7 +33,7 @@ from src.pretrained.face_vid2vid.driven_demo import init_facevid2vid_pretrained_
 from src.pretrained.gpen.gpen_demo import init_gpen_pretrained_model, GPEN_demo
 
 import sys
-sys.path.append('/home/sb1/sanoojan/e4s/ddim')
+sys.path.append('/share/users/sanoojan/e4s/ddim')
 import yaml
 from ddim.runners.diffusion import Diffusion
 from ddim.models.diffusion import Model
@@ -94,19 +94,29 @@ def ddpm_steps(x, seq, model, b, last=True,**kwargs):
             xs.append(sample.to('cpu'))
     return xs, x0_preds
 
-def generalized_steps(x, seq, model, b,last=True, **kwargs):
+def generalized_steps(x, seq, model, b,last=True,batch=False, **kwargs):
     with torch.no_grad():
         n = x.size(0)
-        seq_next = [-1] + list(seq[:-1])
+        breakpoint()
+        if batch :
+           seq_next=[ [-1] +list(se[:-1]) for se in seq]
+        else:
+            seq_next = [-1] + list(seq[:-1])  #seq:range(0, 100, 25) , seq_next: [-1, 0, 25, 50]
         x0_preds = []
         xs = [x]
+
+        
         for i, j in zip(reversed(seq), reversed(seq_next)):
-            t = (torch.ones(n) * i).to(x.device)
-            next_t = (torch.ones(n) * j).to(x.device)
+            t = (torch.ones(n) * i).to(x.device) #tensor([75., 75., 75., 75., 75., 75., 75., 75.], device='cuda:0')
+            next_t = (torch.ones(n) * j).to(x.device) #tensor([50., 50., 50., 50., 50., 50., 50., 50.], device='cuda:0')
+            breakpoint()
             at = compute_alpha(b, t.long())
             at_next = compute_alpha(b, next_t.long())
             xt = xs[-1].to('cuda')
-            et = model(xt, t)
+            et,latent = model.forward_swap(xt, t)
+            if i==seq[-1]:
+                et_last=et
+            
             if len(et)==2:
                 et = et[0]
             breakpoint()
@@ -119,7 +129,7 @@ def generalized_steps(x, seq, model, b,last=True, **kwargs):
             xt_next = at_next.sqrt() * x0_t + c1 * torch.randn_like(x) + c2 * et
             xs.append(xt_next.to('cpu'))
 
-    return xs, x0_preds
+    return et_last,latent,xs, x0_preds
 
 
 
@@ -372,23 +382,35 @@ class Coach:
             skip = self.opts.skip
         except Exception:
             skip = 1
-
+        # current_num_timesteps=100
         if self.opts.sample_type == "generalized":
             if self.opts.skip_type == "uniform":
                 skip = current_num_timesteps // self.opts.timesteps
-                seq = range(0, current_num_timesteps skip)   # 0,..,1000
+                if type(skip)!=int:
+                    seq=[range(0, current_num_timesteps[n], skip[n]) for n in range(len(current_num_timesteps))]
+                else:
+                    seq = range(0, current_num_timesteps, skip)   # 0,..,1000
             elif self.opts.skip_type == "quad":
-                seq = (
-                    np.linspace(
-                        0, np.sqrt(current_num_timesteps * 0.8), self.args.timesteps
+                if type(skip)!=int:
+                    seq = [(
+                        np.linspace(
+                            0, np.sqrt(current_num_timesteps[n] * 0.8), self.args.timesteps
+                        )
+                        ** 2
+                    ) for n in range(len(current_num_timesteps))]
+                    seq=[int(s) for s in list(seq)]   # check if this is correct
+                else:
+                    seq = (
+                        np.linspace(
+                            0, np.sqrt(current_num_timesteps * 0.8), self.args.timesteps
+                        )
+                        ** 2
                     )
-                    ** 2
-                )
-                seq = [int(s) for s in list(seq)]
+                    seq = [int(s) for s in list(seq)]
             else:
                 raise NotImplementedError
             # breakpoint()
-            xs = generalized_steps(x, seq, model, self.betas, eta=self.args.eta,last=last)
+            xs = generalized_steps(x, seq, model, self.betas, eta=self.opts.eta,last=last)
             # breakpoint()
             x = xs
         elif self.opts.sample_type == "ddpm_noisy":
@@ -546,12 +568,16 @@ class Coach:
                     t = torch.cat([t, self.num_timesteps - t - 1], dim=0)[:n]
                     
                     a = (1-b).cumprod(dim=0).index_select(0, t).view(-1, 1, 1, 1)
+                    e= torch.cat((e,e),dim=0)
                     a=torch.concat((a,a),dim=0)
                     a_next=1
                     # breakpoint()
                     x = x * a.sqrt() + e * (1.0 - a).sqrt()
-                    et,latent=self.model.forward_swap(x, t.float())
-                    recon1 = (x - et * (1 - a).sqrt()) / a.sqrt()
+                    et,latent,recon1,_=self.sample_image(x, self.model, current_num_timesteps=t, last=True,return_e=True,return_latent=True)
+                    recon1=recon1[-1]
+                    breakpoint()
+                    # et,latent=self.model.forward_swap(x, t.float())
+                    # recon1 = (x - et * (1 - a).sqrt()) / a.sqrt()
                     # c1 = (
                     #     kwargs.get("eta", 0) * ((1 - at / at_next) * (1 - at_next) / (1 - at)).sqrt()
                     # )

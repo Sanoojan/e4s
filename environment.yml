@@ -213,4 +213,3 @@ dependencies:
       - wcwidth==0.2.6
       - wrapt==1.15.0
       - zipp==3.15.0
-prefix: /home/sb1/miniconda3/envs/e4sdiff
