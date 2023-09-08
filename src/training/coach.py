@@ -33,7 +33,7 @@ from src.pretrained.face_vid2vid.driven_demo import init_facevid2vid_pretrained_
 from src.pretrained.gpen.gpen_demo import init_gpen_pretrained_model, GPEN_demo
 
 import sys
-sys.path.append('/share/users/sanoojan/e4s/ddim')
+sys.path.append('./ddim')
 import yaml
 from ddim.runners.diffusion import Diffusion
 from ddim.models.diffusion import Model
@@ -46,6 +46,7 @@ from torchvision.utils import save_image
 
 from src.training.support import dict2namespace, get_beta_schedule
 
+
 ACCUM = 0.5 ** (32 / (100 * 1000))  #  0.9977843871238888
 
 config_file='celeba.yml'
@@ -54,6 +55,13 @@ with open(os.path.join("ddim/configs", config_file), "r") as f:
 new_config = dict2namespace(config)
 
 normalize=transforms.Compose([NORMALIZE])
+
+
+def custom_breakpoint(*args, **kws):
+    # This is an empty function, which effectively disables breakpoints.
+    pass
+# Set the custom breakpoint function as the default breakpoint hook.
+# sys.breakpointhook = custom_breakpoint
 
 def compute_alpha(beta, t):
     beta = torch.cat([torch.zeros(1).to(beta.device), beta], dim=0)
@@ -94,40 +102,56 @@ def ddpm_steps(x, seq, model, b, last=True,**kwargs):
             xs.append(sample.to('cpu'))
     return xs, x0_preds
 
-def generalized_steps(x, seq, model, b,last=True,batch=False, **kwargs):
-    with torch.no_grad():
-        n = x.size(0)
-        breakpoint()
-        if batch :
-           seq_next=[ [-1] +list(se[:-1]) for se in seq]
-        else:
-            seq_next = [-1] + list(seq[:-1])  #seq:range(0, 100, 25) , seq_next: [-1, 0, 25, 50]
-        x0_preds = []
-        xs = [x]
-
-        
-        for i, j in zip(reversed(seq), reversed(seq_next)):
+def generalized_steps(x, seq, model, b,last=True,batch=True, **kwargs):
+    # with torch.no_grad():
+    n = x.size(0)
+    
+    if batch :
+        seq_next=[ [-1] +list(se[:-1]) for se in seq]
+        n=n//2
+    else:
+        seq_next = [-1] + list(seq[:-1])  #seq:range(0, 100, 25) , seq_next: [-1, 0, 25, 50]
+    x0_preds = []
+    xs = [x]
+    # 
+    seq=[[seq[i][j] for i in reversed(range(n))] for j in reversed(range(len(seq[0])))]
+    seq_next=[[seq_next[i][j] for i in reversed(range(n))] for j in reversed(range(len(seq_next[0])))]
+    
+    # 
+    
+    for i, j in zip((seq), (seq_next)):
+        if not batch:
             t = (torch.ones(n) * i).to(x.device) #tensor([75., 75., 75., 75., 75., 75., 75., 75.], device='cuda:0')
             next_t = (torch.ones(n) * j).to(x.device) #tensor([50., 50., 50., 50., 50., 50., 50., 50.], device='cuda:0')
-            breakpoint()
-            at = compute_alpha(b, t.long())
-            at_next = compute_alpha(b, next_t.long())
-            xt = xs[-1].to('cuda')
-            et,latent = model.forward_swap(xt, t)
-            if i==seq[-1]:
-                et_last=et
-            
-            if len(et)==2:
-                et = et[0]
-            breakpoint()
-            x0_t = (xt - et * (1 - at).sqrt()) / at.sqrt()
-            x0_preds.append(x0_t.to('cpu'))
-            c1 = (
-                kwargs.get("eta", 0) * ((1 - at / at_next) * (1 - at_next) / (1 - at)).sqrt()
-            )
-            c2 = ((1 - at_next) - c1 ** 2).sqrt()
-            xt_next = at_next.sqrt() * x0_t + c1 * torch.randn_like(x) + c2 * et
-            xs.append(xt_next.to('cpu'))
+        else:
+            t = torch.tensor(i).to(x.device)
+            next_t = torch.tensor(j).to(x.device)
+        # 
+        at = compute_alpha(b, t.long())
+        at_next = compute_alpha(b, next_t.long())
+        xt = xs[-1].to('cuda')
+        et,latent = model.forward_swap(xt, t)
+
+        # 
+        if i==seq[0]:
+            et_last=et
+        
+        # if len(et)==2:
+        #     et = et[0]
+        
+        et=torch.cat([et,et],dim=0)   # For processing as grouped batch check @sanoojan
+        at=torch.cat([at,at],dim=0)
+        at_next=torch.cat([at_next,at_next],dim=0)
+        # 
+
+        x0_t = (xt - et * (1 - at).sqrt()) / at.sqrt()
+        x0_preds.append(x0_t.to('cpu'))
+        c1 = (
+            kwargs.get("eta", 0) * ((1 - at / at_next) * (1 - at_next) / (1 - at)).sqrt()
+        )
+        c2 = ((1 - at_next) - c1 ** 2).sqrt()
+        xt_next = at_next.sqrt() * x0_t + c1 * torch.randn_like(x) + c2 * et
+        xs.append(xt_next)
 
     return et_last,latent,xs, x0_preds
 
@@ -313,7 +337,7 @@ class Coach:
 
         # Initialize dataset
         self.train_dataset, self.test_dataset = self.configure_datasets()
-        # breakpoint()
+        # 
         if self.opts.dist_train:
             self.train_sampler = torch.utils.data.distributed.DistributedSampler(self.train_dataset,shuffle=True)
             self.train_dataloader = DataLoader(self.train_dataset,
@@ -385,7 +409,7 @@ class Coach:
         # current_num_timesteps=100
         if self.opts.sample_type == "generalized":
             if self.opts.skip_type == "uniform":
-                skip = current_num_timesteps // self.opts.timesteps
+                skip = (current_num_timesteps-1) // self.opts.timesteps
                 if type(skip)!=int:
                     seq=[range(0, current_num_timesteps[n], skip[n]) for n in range(len(current_num_timesteps))]
                 else:
@@ -409,9 +433,9 @@ class Coach:
                     seq = [int(s) for s in list(seq)]
             else:
                 raise NotImplementedError
-            # breakpoint()
+            # 
             xs = generalized_steps(x, seq, model, self.betas, eta=self.opts.eta,last=last)
-            # breakpoint()
+            # 
             x = xs
         elif self.opts.sample_type == "ddpm_noisy":
             if self.opts.skip_type == "uniform":
@@ -459,7 +483,7 @@ class Coach:
                                     fraction=self.opts.ds_frac,
                                     flip_p=self.opts.flip_p)
         else:
-            # breakpoint()
+            # 
             train_ds = CelebAHQDataset(dataset_root=self.opts.celeba_dataset_root, mode="train",
                                     img_transform=transforms.Compose(
                                         [TO_TENSOR]),     # Removed Normalize and aded after reenactment @sanoojan
@@ -505,12 +529,12 @@ class Coach:
 
 
                 img, mask, mask_vis = batch
-                # breakpoint()
+                # 
                 img = img.to(self.device).float()
                 mask = (mask*255).long().to(self.device)
                 # [bs,1,H,W] format mask to one-hot，i.e., [bs,#seg_cls,H,W]
                 onehot = torch_utils.labelMap2OneHot(mask, num_cls=self.opts.num_seg_cls)
-                # breakpoint()
+                # 
 
                 #2. Reenactment
                 B= img.size(0)
@@ -522,14 +546,14 @@ class Coach:
                 
                 # pred_img=torch.from_numpy(predictions[0]).permute(2, 0, 1).float() 
                 # save_image(pred_img, 'pred_img.png')
-                # breakpoint()
+                # 
     
                 predictions = (predictions*255).astype(np.uint8)
                 # change predictions as numpy array
                 # predictions = predictions.astype(np.uint8)
 
                 # del generator, kp_detector, he_estimator
-                # breakpoint()
+                # 
                 # GPEN input & output [0,255] range with BGR
                 # drivens = [GPEN_demo(pred.flip(dims=[2]), self.GPEN_model, aligned=False,batched=False) for pred in predictions]
                 drivens = [GPEN_demo(pred[:,:,::-1], self.GPEN_model, aligned=False,batched=False) for pred in predictions]
@@ -540,7 +564,7 @@ class Coach:
 
 
 
-                # breakpoint()
+                # 
                 # D = Image.fromarray(drivens[0][:,:,::-1]) # to PIL.Image
 
 
@@ -562,7 +586,7 @@ class Coach:
                     n=n//2
                     # antithetic sampling
                     t = torch.randint(
-                        low=0, high=self.num_timesteps, size=(n // 2 + 1,)
+                        low=self.opts.timesteps+1, high=self.num_timesteps, size=(n // 2 + 1,)  # minimum 1 step
                     ).to(self.device)
                     
                     t = torch.cat([t, self.num_timesteps - t - 1], dim=0)[:n]
@@ -570,13 +594,13 @@ class Coach:
                     a = (1-b).cumprod(dim=0).index_select(0, t).view(-1, 1, 1, 1)
                     e= torch.cat((e,e),dim=0)
                     a=torch.concat((a,a),dim=0)
-                    a_next=1
-                    # breakpoint()
+                    # 
                     x = x * a.sqrt() + e * (1.0 - a).sqrt()
+                    # 
                     et,latent,recon1,_=self.sample_image(x, self.model, current_num_timesteps=t, last=True,return_e=True,return_latent=True)
                     recon1=recon1[-1]
-                    breakpoint()
-                    # et,latent=self.model.forward_swap(x, t.float())
+            
+                    # recon1,latent=self.model.forward_swap(x, t.float())
                     # recon1 = (x - et * (1 - a).sqrt()) / a.sqrt()
                     # c1 = (
                     #     kwargs.get("eta", 0) * ((1 - at / at_next) * (1 - at_next) / (1 - at)).sqrt()
@@ -597,7 +621,7 @@ class Coach:
                     #resize img to 1024
                     recon1 = F.interpolate(recon1, size=(1024, 1024), mode='bilinear', align_corners=True)
 
-
+                    # 
 
                     # print("recon1 shape: ", recon1.shape)
                     # print("latent shape: ", latent.shape)
@@ -628,7 +652,7 @@ class Coach:
                         self.optimizer_D.step()
                         
                     d_loss_dict["r1_loss"] = r1_loss
-                    # breakpoint()
+                    # 
                 # ============ update G ===============
                 # self.opts.train_G and self.opts.train_D should be both true or false
                 if self.opts.train_G and self.opts.train_D:  
@@ -664,21 +688,27 @@ class Coach:
                 x = F.interpolate(img, size=(256, 256), mode='bilinear', align_corners=True)
             
                 # img = data_transform(self.config, img)
-                e = torch.randn_like(x)
+                B, C, H, W = x.size()
+                e = torch.randn(B//2, C, H, W, device=self.device)
                 b = self.betas
                 n=n//2
                 # antithetic sampling
                 t = torch.randint(
-                    low=0, high=self.num_timesteps, size=(n // 2 + 1,)
+                    low=self.opts.timesteps+1, high=self.num_timesteps, size=(n // 2 + 1,)  # minimum 1 step
                 ).to(self.device)
                 
                 t = torch.cat([t, self.num_timesteps - t - 1], dim=0)[:n]
                 
                 a = (1-b).cumprod(dim=0).index_select(0, t).view(-1, 1, 1, 1)
+                e= torch.cat((e,e),dim=0)
                 a=torch.concat((a,a),dim=0)
-                # breakpoint()
+                # 
                 x = x * a.sqrt() + e * (1.0 - a).sqrt()
-                recon1,latent=self.model.forward_swap(x, t.float())
+                # 
+                et,latent,recon1,_=self.sample_image(x, self.model, current_num_timesteps=t, last=True,return_e=True,return_latent=True)
+                recon1=recon1[-1]
+
+                diff_loss=(e[:n] - et).square().sum(dim=(1, 2, 3)).mean(dim=0)
                 # print("recon1 shape: ", recon1.shape)
                 # if keepdim:
                 #     return (e - output).square().sum(dim=(1, 2, 3))
@@ -702,8 +732,8 @@ class Coach:
                 
                 loss_, loss_dict, id_logs = self.calc_loss(img, recon1, mask, latent)
                 loss_dict["g_loss"] = float(g_loss)
-                
-                overall_loss = loss_ + self.opts.g_adv_lambda * g_loss
+                loss_dict["diff_loss"] = float(diff_loss)
+                overall_loss = loss_ + self.opts.g_adv_lambda * g_loss+self.opts.Diffusion_lambda*diff_loss
                 loss_dict["loss"] = float(overall_loss)
                 
                 
@@ -912,36 +942,73 @@ class Coach:
         for batch_idx, batch in enumerate(self.test_dataloader):
             
             img, mask, mask_vis = batch
-            
+
+  
             with torch.no_grad():
                 img = img.to(self.device).float()
                 mask = (mask*255).long().to(self.device)
-                # [bs,1,H,W] format mask to one-hot, i.e., [bs,#seg_cls,H,W]
+            
                 onehot = torch_utils.labelMap2OneHot(mask, num_cls=self.opts.num_seg_cls)
+                # onehot=torch.cat((onehot,torch.flip(onehot, [0])),dim=0)
+                B= img.size(0)
+                src_img=F.interpolate(img[:B//2], size=(256, 256), mode='bilinear', align_corners=True)
+                tar_img=F.interpolate(img[B//2:], size=(256, 256), mode='bilinear', align_corners=True)
+        
+                #  faceVid2Vid  input & output [0,1] range with RGB
+                predictions = drive_source_demo(src_img, tar_img, self.generator, self.kp_detector, self.he_estimator, self.estimate_jacobian,for_train=True)
+                
+         
+                predictions = (predictions*255).astype(np.uint8)
+     
+                drivens = [GPEN_demo(pred[:,:,::-1], self.GPEN_model, aligned=False,batched=False) for pred in predictions]
+                driven_tensor=torch.from_numpy(np.array(drivens)[:,:,:,::-1]/255.0).permute(0, 3, 1, 2).float().cuda()
+                img=torch.cat((driven_tensor,img[B//2:]),dim=0)
+                #normalize img with transform
+                img=normalize(img)
+                #concat reverse order
+                # img=torch.cat((img,torch.flip(img, [0])),dim=0)
+                # mask=torch.cat((mask,torch.flip(mask, [0])),dim=0)
+                
+                # [bs,1,H,W] format mask to one-hot, i.e., [bs,#seg_cls,H,W]
+                
                 
                 # recon1, _, latent = self.net(img, onehot, return_latents=True)    
 
                 # Diffustion start
                 n = img.size(0)
+                # breakpoint()
                 # img resize to 64
                 x = F.interpolate(img, size=(256, 256), mode='bilinear', align_corners=True)
-            
+                
                 # img = data_transform(self.config, img)
-                e = torch.randn_like(x)
+                B, C, H, W = x.size()
+                # breakpoint()
+                e = torch.randn(B//2, C, H, W, device=self.device)
                 b = self.betas
                 n=n//2
                 # antithetic sampling
                 t = torch.randint(
-                    low=0, high=self.num_timesteps, size=(n // 2 + 1,)
+                    low=self.num_timesteps-1, high=self.num_timesteps, size=(n // 2 + 1,)  # minimum 1 step
                 ).to(self.device)
+                # breakpoint()
+                tensor_size = (n // 2 + 1,)  # For example, if n is 10, this will create a tensor of size (6,)
+
+                # Create the tensor filled with the specified value
+                # t = torch.full(size=tensor_size, fill_value=self.num_timesteps).to(self.device)
+                #torch tensor with 100 with size n//2+1
+                # t=torch.full((n//2+1,),self.num_timesteps,dtype=torch.int64,device=self.device)
                 
                 t = torch.cat([t, self.num_timesteps - t - 1], dim=0)[:n]
-                
-                a = (1-b).cumprod(dim=0).index_select(0, t).view(-1, 1, 1, 1)
-                a=torch.concat((a,a),dim=0)
                 # breakpoint()
+                a = (1-b).cumprod(dim=0).index_select(0, t).view(-1, 1, 1, 1)
+                e= torch.cat((e,e),dim=0)
+                a=torch.concat((a,a),dim=0)
+                
                 x = x * a.sqrt() + e * (1.0 - a).sqrt()
-                recon1,latent=self.model.forward_swap(x, t.float())
+                # breakpoint()
+                et,latent,recon1,_=self.sample_image(x, self.model, current_num_timesteps=t, last=True,return_e=True,return_latent=True)
+                recon1=recon1[-1]
+                # breakpoint()
                 # print("recon1 shape: ", recon1.shape)
                 # if keepdim:
                 #     return (e - output).square().sum(dim=(1, 2, 3))
@@ -952,7 +1019,7 @@ class Coach:
 
                 #resize img to 1024
                 recon1 = F.interpolate(recon1, size=(1024, 1024), mode='bilinear', align_corners=True)
-
+                
                 # Diffusion end
 
 
@@ -960,7 +1027,7 @@ class Coach:
                 if self.opts.train_D:
                     fake_pred_1 = self.D(recon1)
                     g_loss = self.adv_g_loss(fake_pred_1)
-                
+                # breakpoint()
                 loss_, loss_dict, id_logs = self.calc_loss(img, recon1, mask, latent)
                 loss_dict["g_loss"] = float(g_loss)
                 
@@ -988,3 +1055,4 @@ class Coach:
         if self.opts.train_D:
             self.D.train()
         return loss_dict
+

@@ -21,7 +21,7 @@ class OptimOptions:
 		self.parser.add_argument('--train_G', default=False, type=bool, help='Whether to train the styleGAN model')
   
         # ================= Dataset =====================
-		self.parser.add_argument('--dataset_root', default='./data//CelebAMask-HQ', type=str, help='dataset root path')
+		self.parser.add_argument('--dataset_root', default='./data/FaceData/CelebAMask-HQ', type=str, help='dataset root path')
 		self.parser.add_argument('--ds_frac', default=1.0, type=float, help='dataset fraction')
 		self.parser.add_argument('--test_batch_size', default=1, type=int, help='Batch size for testing and inference')
 		self.parser.add_argument('--test_workers', default=4, type=int, help='Number of test/inference dataloader workers')

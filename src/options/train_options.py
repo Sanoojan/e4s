@@ -16,12 +16,12 @@ class TrainOptions:
 		self.parser.add_argument('--remaining_layer_idx', type=int, default=13, help='mask-guided style injection, i.e., K in paper')
   
         # ================= Dataset =====================
-		self.parser.add_argument('--celeba_dataset_root', default='./data/CelebAMask-HQ', type=str, help='CelebAMask-HQ dataset root path')
+		self.parser.add_argument('--celeba_dataset_root', default='./data/FaceData/CelebAMask-HQ', type=str, help='CelebAMask-HQ dataset root path')
 		self.parser.add_argument('--ffhq_dataset_root', default='./data/FFHQ', type=str, help='FFHQ dataset root path')
 		self.parser.add_argument('--dataset_name', default='celeba', type=str, help='which dataset to use')
 		self.parser.add_argument('--flip_p', default=0.5, type=float, help='probalility to apply horizontal flipping')
 		self.parser.add_argument('--ds_frac', default=1.0, type=float, help='dataset fraction')
-		self.parser.add_argument('--batch_size', default=8, type=int, help='Batch size for training')
+		self.parser.add_argument('--batch_size', default=2, type=int, help='Batch size for training')
 		self.parser.add_argument('--test_batch_size', default=2, type=int, help='Batch size for testing and inference')
 		self.parser.add_argument('--workers', default=4, type=int, help='Number of train dataloader workers')
 		self.parser.add_argument('--test_workers', default=4, type=int, help='Number of test/inference dataloader workers')
@@ -62,10 +62,11 @@ class TrainOptions:
 		# ================== Diffusion ==================
 
 		self.parser.add_argument('--skip', default=50, type=int, help='DDPM skip steps')
-		self.parser.add_argument('--timesteps', default=4, type=int, help='DDPM steps')
+		self.parser.add_argument('--timesteps', default=3, type=int, help='DDPM steps')
 		self.parser.add_argument('--sample_type', default='generalized', type=str, help='Diffusion sample type')
 		self.parser.add_argument('--skip_type', default='uniform', type=str, help='Diffusion skip type')
 		self.parser.add_argument('--eta', default=0.0, type=float, help='Diffuisoin eta')
+		
 
 
         # ================== styleGAN2 ==================

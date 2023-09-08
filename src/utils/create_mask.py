@@ -26,8 +26,8 @@ faceParser_label_list_detailed = ['background', 'lip', 'eyebrows', 'eyes', 'hair
                                   'nose', 'skin', 'ears', 'belowface', 'mouth', 
                                   'eye_glass', 'ear_rings']
 
-Dataset_maskPath='/home/sb1/sanoojan/e4s/data/CelebAMask-HQ/CelebA-HQ-mask'
-save_path='/home/sb1/sanoojan/e4s/data/CelebAMask-HQ/CelebA-HQ-mask/Overall_mask'
+Dataset_maskPath='/home/sanoojan/e4s/data/FaceData/CelebAMask-HQ/CelebA-HQ-mask'
+save_path='/home/sanoojan/e4s/data/FaceData/CelebAMask-HQ/CelebA-HQ-mask/Overall_mask'
 if not os.path.exists(save_path):
     os.mkdir(save_path)
 for i in range(30000):
