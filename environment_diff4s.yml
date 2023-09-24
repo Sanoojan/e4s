@@ -1,4 +1,4 @@
-name: diff4s
+name: diff4s_ori
 channels:
   - pytorch
   - conda-forge
@@ -171,4 +171,4 @@ dependencies:
     - watchdog==3.0.0
     - yarl==1.9.2
     - zipp==3.15.0
-prefix: /share/softwares/anaconda/anaconda3/envs/diff4s
+prefix: /share/softwares/anaconda/anaconda3/envs/diff4s_ori

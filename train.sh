@@ -39,8 +39,8 @@
 #         --out_size=1024 
 
 CUDA_VISIBLE_DEVICES=2 python -W ignore scripts/train.py \
-        --exp_dir='Experiments/celeba/diffusion/DDIM_denoising_added_ours2_with_diffusion_loss' \
+        --exp_dir='Experiments/celeba/diffusion/DDIM_denoising_added_ours2_with_diffusion_loss_id_0.05' \
         --dataset_name='celeba' \
-        --id_lambda=0.3 \
+        --id_lambda=0.05 \
         --face_parsing_lambda=0.0 \
         --out_size=1024 
